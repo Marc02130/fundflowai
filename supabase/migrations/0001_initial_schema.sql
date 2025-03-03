@@ -7,7 +7,7 @@ create type public.document_package_type as enum (
 );
 
 
--- Create document_package_type enum
+-- Create file_type enum
 create type public.file_type as enum (
   'pdf',
   'doc',
@@ -125,6 +125,7 @@ create table public.grant_sections (
   output_type character varying(10) not null default null::character varying,
   flow_order integer null,
   optional boolean null default false,
+  resubmission boolean null default false,
   ai_generator_prompt text null,
   ai_editor_prompt text null,
   ai_error_prompt text null,
@@ -211,7 +212,6 @@ create table public.grant_application_section (
   updated_at timestamp without time zone not null default now(),
   flow_order integer null,
   instructions text null,
-  ai_functions jsonb null,
   constraint grant_application_section_pkey primary key (id),
   constraint grant_application_section_grant_application_id_fkey foreign KEY (grant_application_id) references grant_applications (id),
   constraint grant_application_section_grant_section_id_fkey foreign KEY (grant_section_id) references grant_sections (id)

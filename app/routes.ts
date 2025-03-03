@@ -13,6 +13,10 @@ export default [
       {
         path: "profile",
         file: "routes/dashboard.profile.tsx",
+      },
+      {
+        path: "new",
+        file: "routes/dashboard.new.tsx",
       }
     ]
   }

@@ -291,7 +291,7 @@ export default function Dashboard() {
       {/* Main content area */}
       <div className="flex-1">
         <header className="bg-white shadow">
-          <div className="px-4 py-6">
+          <div className="h-[72px] flex items-end px-4 pb-4">
             <h1 className="text-2xl font-bold text-gray-900">
               {isActiveRoute('/dashboard') && 'Dashboard'}
               {isActiveRoute('/dashboard/new') && 'New Application'}
