@@ -1,0 +1,6 @@
+<svg width="300" height="50" viewBox="0 0 300 50" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M10 10H40V40H10V10Z" fill="#4F46E5"/>
+  <path d="M45 10H75V40H45V10Z" fill="#4338CA"/>
+  <path d="M80 10H110V40H80V10Z" fill="#3730A3"/>
+  <text x="120" y="30" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="#111827">Fund Flow AI</text>
+</svg> 

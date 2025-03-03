@@ -1,3 +1,19 @@
 import { type RouteConfig, index } from "@react-router/dev/routes";
 
-export default [index("routes/home.tsx")] satisfies RouteConfig;
+export default [
+  index("routes/home.tsx"),
+  {
+    path: "/auth",
+    file: "routes/auth.tsx",
+  },
+  {
+    path: "/dashboard",
+    file: "routes/dashboard.tsx",
+    children: [
+      {
+        path: "profile",
+        file: "routes/dashboard.profile.tsx",
+      }
+    ]
+  }
+] satisfies RouteConfig;

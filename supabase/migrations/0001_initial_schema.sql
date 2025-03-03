@@ -28,6 +28,21 @@ create type public.file_type as enum (
   'svg'
 );
 
+DROP TABLE IF EXISTS public.user_ai_prompts;
+DROP TABLE IF EXISTS public.grant_application_section_fields;
+DROP TABLE IF EXISTS public.grant_application_section_documents;
+DROP TABLE IF EXISTS public.grant_application_section;
+DROP TABLE IF EXISTS public.grant_application_documents;
+DROP TABLE IF EXISTS public.grant_applications;
+DROP TABLE IF EXISTS public.grant_opportunities;
+DROP TABLE IF EXISTS public.grant_requirements;
+DROP TABLE IF EXISTS public.grant_sections;
+DROP TABLE IF EXISTS public.grant_type;
+DROP TABLE IF EXISTS public.organization_grant_requirements;
+DROP TABLE IF EXISTS public.grants;
+DROP TABLE IF EXISTS public.user_profiles;
+DROP TABLE IF EXISTS public.organizations;
+
 -- Create organizations table
 create table public.organizations (
   id uuid not null default gen_random_uuid (),
@@ -52,6 +67,7 @@ create table public.user_profiles (
   updated_at timestamp without time zone not null default now(),
   deleted_at timestamp without time zone null,
   role character varying(50) not null default 'user'::character varying,
+  display_name text null,
   constraint user_profiles_pkey primary key (id),
   constraint fk_users_organization foreign KEY (organization_id) references organizations (id)
 ) TABLESPACE pg_default;

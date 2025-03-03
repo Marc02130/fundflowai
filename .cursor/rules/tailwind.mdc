@@ -1,6 +1,7 @@
 ---
 description: Best practices for Tailwind CSS v4+ implementation and optimization
 globs: **/*.{js,jsx,ts,tsx}, tailwind.config.{js,ts}, **/*.css
+alwaysApply: false
 ---
 ---
 description: Best practices for Tailwind CSS v4+ implementation and optimization
@@ -19,6 +20,19 @@ globs: **/*.{js,jsx,ts,tsx}, tailwind.config.{js,ts}, **/*.css
 - Use Tailwind CSS version 4.0 or higher
 - Avoid legacy Tailwind classes that were removed in version 4.0
 - Ensure class names and utility usage align with Tailwind 4+ best practices
+
+## Complexity Management
+- Use complex Tailwind features ONLY when explicitly requested
+- Default to simpler approaches even when more advanced options are available
+- Advanced features requiring explicit request include:
+  - JIT mode optimizations
+  - Complex gradient effects
+  - Advanced responsive designs using multiple breakpoints
+  - Dynamic class generation with state management
+  - RTL/bidirectional text support
+  - PurgeCSS optimizations
+  - Complex animation sequences
+- Document where and why complex features are being used
 
 ## Tailwind CSS Rules
 - Use JIT mode for optimized builds
