@@ -43,7 +43,10 @@ export default function OptionalSectionsStep({ grantId, onNext }: OptionalSectio
   }, [grantId]);
 
   const handleNext = () => {
-    onNext({ selectedSections });
+    return new Promise<void>((resolve) => {
+      onNext({ selectedSections });
+      resolve();
+    });
   };
 
   const toggleSection = (sectionId: string) => {
@@ -52,6 +55,13 @@ export default function OptionalSectionsStep({ grantId, onNext }: OptionalSectio
         ? prev.filter(id => id !== sectionId)
         : [...prev, sectionId]
     );
+  };
+
+  // Expose state values for the parent component
+  (window as any).currentStepState = {
+    handleNext: () => {
+      return handleNext();
+    }
   };
 
   if (error) {

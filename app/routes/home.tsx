@@ -1,4 +1,4 @@
-import { Link } from "react-router";
+import { Link } from "react-router-dom";
 import { useAuth } from "~/context/AuthContext";
 import type { Route } from "./+types/home";
 

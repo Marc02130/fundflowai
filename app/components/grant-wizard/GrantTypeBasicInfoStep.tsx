@@ -81,6 +81,17 @@ export default function GrantTypeBasicInfoStep({ organizationId, onNext }: Grant
 
   const isValid = title.trim() && description.trim() && selectedType;
 
+  // Expose state values for the parent component
+  (window as any).currentStepState = {
+    handleNext: () => {
+      console.log('currentStepState.handleNext called');
+      if (isValid) {
+        console.log('Form is valid, calling handleNext');
+        handleNext();
+      }
+    }
+  };
+
   if (!organizationId) {
     console.log('GrantTypeBasicInfoStep rendering "select organization" message');
     return (
@@ -189,21 +200,6 @@ export default function GrantTypeBasicInfoStep({ organizationId, onNext }: Grant
         <label htmlFor="resubmission" className="ml-2 block text-sm text-gray-900">
           This is a resubmission
         </label>
-      </div>
-
-      {/* Next button */}
-      <div className="mt-6">
-        <button
-          onClick={handleNext}
-          disabled={!isValid}
-          className={`w-48 px-4 py-2 rounded ${
-            !isValid
-              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-              : 'bg-indigo-600 text-white hover:bg-indigo-700'
-          }`}
-        >
-          Next
-        </button>
       </div>
     </div>
   );

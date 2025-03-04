@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, Link, Outlet, useLocation } from 'react-router';
+import { useNavigate, Link, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '~/context/AuthContext';
 import type { Route } from '~/+types/auth';
 import { supabase } from '~/lib/supabase'; 
@@ -15,7 +15,7 @@ export default function Dashboard() {
   const { user, profile, loading, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [isUnsubmittedExpanded, setIsUnsubmittedExpanded] = useState(false);
+  const [isUnsubmittedExpanded, setIsUnsubmittedExpanded] = useState(true);
   const [inProgressApplications, setInProgressApplications] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
@@ -25,12 +25,12 @@ export default function Dashboard() {
     return location.pathname === path;
   };
 
-  // Fetch in-progress applications when accordion is expanded
+  // Fetch in-progress applications on mount and when user changes
   useEffect(() => {
-    if (isUnsubmittedExpanded && user) {
+    if (user) {
       fetchInProgressApplications();
     }
-  }, [isUnsubmittedExpanded, user]);
+  }, [user]);
 
   // Function to fetch in-progress applications from database
   const fetchInProgressApplications = async () => {
@@ -38,9 +38,9 @@ export default function Dashboard() {
       setIsLoading(true);
       const { data, error } = await supabase
         .from('grant_applications')
-        .select('id, title, status')
-        .eq('user_id', user?.id)
-        .in('status', ['Draft', 'In Progress', 'In Review'])
+        .select('id, title')
+        .eq('user_profiles_id', user?.id)
+        .eq('status', 'in-progress')
         .order('updated_at', { ascending: false })
         .limit(5);
       
@@ -65,7 +65,7 @@ export default function Dashboard() {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center">
-          <svg className="mx-auto h-12 w-12 animate-spin text-indigo-600" fill="none" viewBox="0 0 24 24">
+          <svg className="mx-auto h-12 w-12 animate-spin text-indigo-600" fill="none" viewBox="0 0 36 36">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
           </svg>
@@ -83,7 +83,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen flex">
       {/* Left navigation sidebar with collapse functionality */}
-      <div className={`${navCollapsed ? 'w-16' : 'w-64'} border-r border-gray-200 min-h-screen transition-all duration-300 relative`} style={{ minWidth: navCollapsed ? '4rem' : '16rem' }}>
+      <div className={`${navCollapsed ? 'w-12' : 'w-48'} border-r border-gray-200 min-h-screen transition-all duration-300 relative`}>
         <div className="p-4 border-b border-gray-200 flex justify-between items-center">
           {!navCollapsed && (
             <Link to="/" className="flex items-center">
@@ -92,129 +92,87 @@ export default function Dashboard() {
           )}
           <button 
             onClick={() => setNavCollapsed(!navCollapsed)} 
-            className="p-2 rounded-md hover:bg-gray-100 transition-colors"
+            className="p-2 rounded-md hover:bg-gray-100 transition-colors !text-2xl"
             aria-label={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {navCollapsed ? '→' : '←'}
           </button>
         </div>
         
-        <nav className="py-8" style={{ padding: '1rem 0' }}>
-          <ul className="space-y-6" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <li style={{ marginBottom: '0.5rem' }}>
+        <nav className="py-8">
+          <ul className="flex flex-col gap-2">
+            <li className="mb-2">
               <Link 
                 to="/dashboard" 
-                className={`flex items-center px-6 py-6 text-lg hover:bg-gray-200 rounded-md ${isActiveRoute('/dashboard') ? 'bg-gray-200 font-semibold' : ''}`}
+                className={`flex items-center px-4 py-3 text-2xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard') ? 'bg-gray-200 font-semibold' : ''}`}
                 title="Home"
-                style={{ 
-                  display: 'flex', 
-                  padding: '0.75rem 1.25rem', 
-                  fontSize: '1.125rem', 
-                  lineHeight: '1.5rem',
-                  borderRadius: '0.375rem'
-                }}
               >
-                <span className="text-2xl" style={{ fontSize: '1.5rem' }}>⌂</span>
-                {!navCollapsed && <span style={{ marginLeft: '0.75rem', display: 'inline-block' }}>Home</span>}
+                <span className="text-2xl shrink-0">⌂</span>
+                {!navCollapsed && <span className="ml-3">Home</span>}
               </Link>
             </li>
             
-            <li style={{ marginBottom: '0.5rem' }}>
+            <li className="mb-2">
               <Link 
                 to="/dashboard/new" 
-                className={`flex items-center px-6 py-6 text-lg hover:bg-gray-200 rounded-md ${isActiveRoute('/dashboard/new') ? 'bg-gray-200 font-semibold' : ''}`}
+                className={`flex items-center px-4 py-3 text-2xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/new') ? 'bg-gray-200 font-semibold' : ''}`}
                 title="New Application"
-                style={{ 
-                  display: 'flex', 
-                  padding: '0.75rem 1.25rem', 
-                  fontSize: '1.125rem', 
-                  lineHeight: '1.5rem',
-                  borderRadius: '0.375rem'
-                }}
               >
-                <span className="text-2xl" style={{ fontSize: '1.5rem' }}>+</span>
-                {!navCollapsed && <span style={{ marginLeft: '0.75rem', display: 'inline-block' }}>New Application</span>}
+                <span className="text-2xl shrink-0">+</span>
+                {!navCollapsed && <span className="ml-3">New Application</span>}
               </Link>
             </li>
 
             {/* Unsubmitted Applications - pure accordion */}
-            <li style={{ marginBottom: '0.5rem' }}>
+            <li className="mb-2">
               <div 
-                className="flex items-center px-6 py-6 text-lg hover:bg-gray-200 cursor-pointer rounded-md"
+                className={`flex items-start px-4 py-3 text-2xl hover:bg-gray-200 rounded-md min-h-14 transition-colors cursor-pointer ${inProgressApplications.length > 0 ? 'bg-gray-100' : ''}`}
                 onClick={() => setIsUnsubmittedExpanded(!isUnsubmittedExpanded)}
                 title="Unsubmitted Applications"
-                style={{ 
-                  display: 'flex', 
-                  padding: '0.75rem 1.25rem', 
-                  fontSize: '1.125rem', 
-                  lineHeight: '1.5rem',
-                  borderRadius: '0.375rem',
-                  cursor: 'pointer'
-                }}
               >
-                <span className="text-2xl" style={{ fontSize: '1.5rem' }}>○</span>
+                <span className="text-2xl shrink-0">○</span>
                 {!navCollapsed && (
                   <>
-                    <span style={{ marginLeft: '0.75rem', display: 'inline-block' }}>Unsubmitted Applications</span>
-                    <span style={{ marginLeft: 'auto', fontSize: '1.25rem' }}>{isUnsubmittedExpanded ? '▾' : '▸'}</span>
+                    <span className="ml-3 break-words">
+                      Unsubmitted Applications
+                    </span>
+                    <span className="ml-auto text-2xl transition-transform shrink-0">
+                      {isUnsubmittedExpanded ? '▾' : '▸'}
+                    </span>
                   </>
                 )}
               </div>
               
               {/* Dropdown content */}
               {isUnsubmittedExpanded && (
-                <ul style={{ 
-                  paddingLeft: navCollapsed ? '0.75rem' : '2rem',
-                  marginTop: '0.5rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.5rem'
-                }}>
+                <ul className={`mt-2 flex flex-col gap-2 ${navCollapsed ? 'pl-3' : 'pl-8'}`}>
                   {isLoading ? (
-                    <li style={{ 
-                      padding: '0.5rem 0.75rem', 
-                      color: '#6b7280',
-                      fontSize: '1.125rem'
-                    }}>
-                      {!navCollapsed && "Loading..."}
+                    <li className="px-3 py-2 text-2xl text-gray-500">
+                      {!navCollapsed && (
+                        <div className="flex items-center">
+                          <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          Loading...
+                        </div>
+                      )}
                     </li>
                   ) : inProgressApplications.length > 0 ? (
                     <>
                       {!navCollapsed && inProgressApplications.map(app => (
-                        <li key={app.id} style={{ marginBottom: '0.5rem' }}>
+                        <li key={app.id} className="mb-2">
                           <Link 
-                            to={`/dashboard/unsubmitted/${app.id}`}
-                            style={{ 
-                              display: 'block',
-                              padding: '0.5rem 0.75rem',
-                              fontSize: '1.125rem',
-                              borderRadius: '0.375rem'
-                            }}
+                            to={`/dashboard/applications/${app.id}`}
+                            className="block px-3 py-2 rounded-md hover:bg-gray-100 transition-colors text-gray-900 text-2xl"
                           >
-                            {app.title} [{app.status}]
+                            {app.title}
                           </Link>
                         </li>
                       ))}
-                      <li>
-                        <Link 
-                          to="/dashboard/unsubmitted"
-                          style={{ 
-                            display: 'block',
-                            padding: '0.5rem 0.75rem',
-                            fontSize: '1.125rem',
-                            borderRadius: '0.375rem'
-                          }}
-                        >
-                          {!navCollapsed && "View all →"}
-                        </Link>
-                      </li>
                     </>
                   ) : (
-                    <li style={{ 
-                      padding: '0.5rem 0.75rem', 
-                      color: '#6b7280',
-                      fontSize: '1.125rem'
-                    }}>
+                    <li className="px-3 py-2 text-2xl text-gray-500">
                       {!navCollapsed && "No applications"}
                     </li>
                   )}
@@ -222,48 +180,30 @@ export default function Dashboard() {
               )}
             </li>
 
-            <li style={{ marginBottom: '0.5rem' }}>
+            <li className="mb-2">
               <Link 
                 to="/dashboard/submitted" 
-                className={`flex items-center px-6 py-6 text-lg hover:bg-gray-200 rounded-md ${isActiveRoute('/dashboard/submitted') ? 'bg-gray-200 font-semibold' : ''}`}
+                className={`flex items-start px-4 py-3 text-2xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/submitted') ? 'bg-gray-200 font-semibold' : ''}`}
                 title="Submitted Applications"
-                style={{ 
-                  display: 'flex', 
-                  padding: '0.75rem 1.25rem', 
-                  fontSize: '1.125rem', 
-                  lineHeight: '1.5rem',
-                  borderRadius: '0.375rem'
-                }}
               >
-                <span className="text-2xl" style={{ fontSize: '1.5rem' }}>●</span>
-                {!navCollapsed && <span style={{ marginLeft: '0.75rem', display: 'inline-block' }}>Submitted Applications</span>}
+                <span className="text-2xl shrink-0">●</span>
+                {!navCollapsed && <span className="ml-3 break-words">Submitted Applications</span>}
               </Link>
             </li>
 
             {/* Profile navigation item */}
-            <li style={{ marginBottom: '0.5rem', marginTop: '1.5rem' }}>
+            <li className="mb-2 mt-6">
               <Link 
                 to="/dashboard/profile" 
-                className={`flex items-center px-6 py-6 text-lg hover:bg-gray-200 rounded-md ${isActiveRoute('/dashboard/profile') ? 'bg-gray-200 font-semibold' : ''}`}
+                className={`flex items-center px-4 py-3 text-2xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/profile') ? 'bg-gray-200 font-semibold' : ''}`}
                 title="Profile"
-                style={{ 
-                  display: 'flex', 
-                  padding: '0.75rem 1.25rem', 
-                  fontSize: '1.125rem', 
-                  lineHeight: '1.5rem',
-                  borderRadius: '0.375rem'
-                }}
               >
-                <span className="text-2xl" style={{ fontSize: '1.5rem' }}>◆</span>
-                {!navCollapsed && <span style={{ marginLeft: '0.75rem', display: 'inline-block' }}>Profile</span>}
+                <span className="text-2xl shrink-0">◆</span>
+                {!navCollapsed && <span className="ml-3">Profile</span>}
               </Link>
             </li>
 
-            <li style={{ 
-              marginTop: '2rem', 
-              paddingTop: '0.75rem',
-              borderTop: '1px solid #e5e7eb'
-            }}>
+            <li className="mt-8 pt-3 border-t border-gray-200">
               <Link 
                 to="/"
                 onClick={(e) => {
@@ -271,17 +211,11 @@ export default function Dashboard() {
                   signOut();
                   navigate('/');
                 }}
-                style={{ 
-                  display: 'flex', 
-                  padding: '0.75rem 1.25rem', 
-                  fontSize: '1.125rem', 
-                  lineHeight: '1.5rem',
-                  borderRadius: '0.375rem'
-                }}
+                className="flex items-center px-4 py-3 text-2xl hover:bg-gray-200 rounded-md min-h-14 transition-colors"
                 title="Sign out"
               >
-                <span style={{ fontSize: '1.5rem' }}>⤴</span>
-                {!navCollapsed && <span style={{ marginLeft: '0.75rem', display: 'inline-block' }}>Sign out</span>}
+                <span className="text-2xl shrink-0">⤴</span>
+                {!navCollapsed && <span className="ml-3">Sign out</span>}
               </Link>
             </li>
           </ul>

@@ -67,8 +67,10 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
             {currentComponent && (
               <button
                 onClick={() => {
+                  console.log('Next button clicked');
                   const stepState = (window as any).currentStepState;
                   if (stepState?.handleNext) {
+                    console.log('Calling stepState.handleNext');
                     stepState.handleNext();
                   }
                 }}
@@ -86,19 +88,26 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
         {currentComponent ? (
           React.cloneElement(currentComponent as any, {
             onNext: async (stepData: any) => {
-              const newFormData = { ...formData, ...stepData };
-              setFormData(newFormData);
-              
-              // If the step's onNext returns a Promise, wait for it
-              const onNextResult = (currentComponent as any).props.onNext(stepData);
-              if (onNextResult instanceof Promise) {
-                await onNextResult;
-              }
-              
-              if (currentStep === steps.length - 1) {
-                onComplete(newFormData);
-              } else {
-                setCurrentStep(currentStep + 1);
+              console.log('WizardContainer onNext called with data:', stepData);
+              try {
+                const newFormData = { ...formData, ...stepData };
+                setFormData(newFormData);
+                
+                // If the current component has an onNext prop, call it and wait for it
+                if ((currentComponent as any).props.onNext) {
+                  console.log('Calling component onNext prop');
+                  await (currentComponent as any).props.onNext(stepData);
+                }
+                
+                if (currentStep === steps.length - 1) {
+                  console.log('Completing wizard');
+                  await onComplete(newFormData);
+                } else {
+                  console.log('Moving to next step');
+                  setCurrentStep(currentStep + 1);
+                }
+              } catch (error) {
+                console.error('Error in step transition:', error);
               }
             }
           })

@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router';
+import { useState, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '~/lib/supabase';
 import WizardContainer from '~/components/grant-wizard/WizardContainer';
 import OrganizationOpportunityStep from '~/components/grant-wizard/OrganizationOpportunityStep';
@@ -14,6 +14,7 @@ interface WizardData {
   grantTypeId?: string;
   resubmission?: boolean;
   selectedSections?: string[];
+  grantId?: string;
 }
 
 export default function NewGrantApplication() {
@@ -21,7 +22,7 @@ export default function NewGrantApplication() {
   const [wizardData, setWizardData] = useState<WizardData>({});
   const [error, setError] = useState<string | null>(null);
 
-  const handleComplete = async (data: WizardData) => {
+  const handleComplete = useCallback(async (data: WizardData) => {
     try {
       // Get the current user
       const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -50,26 +51,76 @@ export default function NewGrantApplication() {
       console.error('Error creating application:', err);
       setError('Failed to create application');
     }
-  };
+  }, [navigate]);
+
+  const handleOrganizationOpportunityNext = useCallback(async (data: any) => {
+    return new Promise<void>(async (resolve, reject) => {
+      try {
+        // First get the grant_id for the selected opportunity
+        const { data: opportunityData, error: opportunityError } = await supabase
+          .from('grant_opportunities')
+          .select('grant_id')
+          .eq('id', data.opportunityId)
+          .single();
+
+        if (opportunityError) {
+          console.error('Error fetching opportunity:', opportunityError);
+          reject(opportunityError);
+          return;
+        }
+
+        setWizardData((prev) => {
+          const newData = {
+            ...prev,
+            organizationId: data.organizationId,
+            opportunityId: data.opportunityId,
+            grantId: opportunityData.grant_id
+          };
+          resolve();
+          return newData;
+        });
+      } catch (err) {
+        console.error('Error in onNext:', err);
+        reject(err);
+      }
+    });
+  }, []);
+
+  const handleGrantTypeBasicInfoNext = useCallback((data: any) => {
+    return new Promise<void>((resolve) => {
+      setWizardData((prev) => {
+        const newData = {
+          ...prev,
+          title: data.title,
+          description: data.description,
+          grantTypeId: data.grantTypeId,
+          resubmission: data.resubmission,
+        };
+        resolve();
+        return newData;
+      });
+    });
+  }, []);
+
+  const handleOptionalSectionsNext = useCallback((data: any) => {
+    return new Promise<void>((resolve) => {
+      setWizardData((prev) => {
+        const newData = {
+          ...prev,
+          selectedSections: data.selectedSections,
+        };
+        resolve();
+        return newData;
+      });
+    });
+  }, []);
 
   const steps = useMemo(() => [
     {
       title: 'Organization & Opportunity',
       component: (
         <OrganizationOpportunityStep
-          onNext={(data) => {
-            return new Promise<void>((resolve) => {
-              setWizardData((prev) => {
-                const newData = {
-                  ...prev,
-                  organizationId: data.organizationId,
-                  opportunityId: data.opportunityId,
-                };
-                resolve();
-                return newData;
-              });
-            });
-          }}
+          onNext={handleOrganizationOpportunityNext}
         />
       ),
     },
@@ -78,15 +129,7 @@ export default function NewGrantApplication() {
       component: (
         <GrantTypeBasicInfoStep
           organizationId={wizardData.organizationId || ''}
-          onNext={(data) => {
-            setWizardData((prev) => ({
-              ...prev,
-              title: data.title,
-              description: data.description,
-              grantTypeId: data.grantTypeId,
-              resubmission: data.resubmission,
-            }));
-          }}
+          onNext={handleGrantTypeBasicInfoNext}
         />
       ),
     },
@@ -94,45 +137,12 @@ export default function NewGrantApplication() {
       title: 'Optional Sections',
       component: (
         <OptionalSectionsStep
-          grantId={wizardData.grantTypeId || ''}
-          onNext={(data) => {
-            setWizardData((prev) => ({
-              ...prev,
-              selectedSections: data.selectedSections,
-            }));
-          }}
+          grantId={wizardData.grantId || ''}
+          onNext={handleOptionalSectionsNext}
         />
       ),
     },
-  ], []);
-
-  // Create refs to hold the current values
-  const organizationIdRef = useMemo(() => ({
-    current: wizardData.organizationId || ''
-  }), [wizardData.organizationId]);
-
-  const grantTypeIdRef = useMemo(() => ({
-    current: wizardData.grantTypeId || ''
-  }), [wizardData.grantTypeId]);
-
-  // Update refs when wizardData changes
-  useEffect(() => {
-    organizationIdRef.current = wizardData.organizationId || '';
-    grantTypeIdRef.current = wizardData.grantTypeId || '';
-  }, [wizardData]);
-
-  // Update the steps to use refs
-  useEffect(() => {
-    const grantTypeStep = steps[1].component as any;
-    if (grantTypeStep) {
-      grantTypeStep.props.organizationId = organizationIdRef.current;
-    }
-
-    const optionalSectionsStep = steps[2].component as any;
-    if (optionalSectionsStep) {
-      optionalSectionsStep.props.grantId = grantTypeIdRef.current;
-    }
-  }, [steps, wizardData]);
+  ], [wizardData.organizationId, wizardData.grantId, handleOrganizationOpportunityNext, handleGrantTypeBasicInfoNext, handleOptionalSectionsNext]);
 
   return (
     <div className="max-w-4xl mx-auto py-8">
