@@ -127,10 +127,6 @@ create table public.grant_sections (
   optional boolean null default false,
   resubmission boolean null default false,
   ai_generator_prompt text null,
-  ai_editor_prompt text null,
-  ai_error_prompt text null,
-  ai_visualizations_prompt text null,
-  ai_requirements_prompt text null,
   document_package public.document_package_type null default 'Full Proposal'::document_package_type,
   instructions text null,
   constraint grant_sections_pkey primary key (id),
@@ -196,6 +192,7 @@ create index IF not exists idx_grant_applications_opportunity_id on public.grant
 create table public.grant_application_documents (
   id uuid not null default gen_random_uuid (),
   grant_application_id uuid not null,
+  file_name character varying(255) null,
   file_type public.file_type not null,
   file_path character varying(1024) not null,
   created_at timestamp without time zone not null default now(),
@@ -213,7 +210,6 @@ create table public.grant_application_section (
   created_at timestamp without time zone not null default now(),
   updated_at timestamp without time zone not null default now(),
   flow_order integer null,
-  instructions text null,
   constraint grant_application_section_pkey primary key (id),
   constraint grant_application_section_grant_application_id_fkey foreign KEY (grant_application_id) references grant_applications (id),
   constraint grant_application_section_grant_section_id_fkey foreign KEY (grant_section_id) references grant_sections (id)
@@ -223,6 +219,7 @@ create table public.grant_application_section (
 create table public.grant_application_section_documents (
   id uuid not null default gen_random_uuid (),
   grant_application_section_id uuid not null,
+  file_name character varying(255) null,
   file_type public.file_type not null,
   file_path character varying(1024) not null,
   created_at timestamp without time zone not null default now(),

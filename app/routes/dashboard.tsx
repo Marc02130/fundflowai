@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, Link, Outlet, useLocation } from 'react-router-dom';
+import { useNavigate, Link, Outlet, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from '~/context/AuthContext';
 import type { Route } from '~/+types/auth';
 import { supabase } from '~/lib/supabase';
@@ -16,11 +16,41 @@ export default function Dashboard() {
   const { user, profile, loading, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const params = useParams();
   const [isUnsubmittedExpanded, setIsUnsubmittedExpanded] = useState(true);
   const [inProgressApplications, setInProgressApplications] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
+  const [sectionName, setSectionName] = useState<string | null>(null);
   
+  // Load section name if we're in a section
+  useEffect(() => {
+    async function loadSectionName() {
+      if (params.sectionId) {
+        const { data, error } = await supabase
+          .from('grant_application_section')
+          .select(`
+            grant_section:grant_section_id(
+              name
+            )
+          `)
+          .eq('id', params.sectionId)
+          .single() as { 
+            data: { grant_section: { name: string } } | null, 
+            error: any 
+          };
+
+        if (!error && data?.grant_section?.name) {
+          setSectionName(data.grant_section.name);
+        }
+      } else {
+        setSectionName(null);
+      }
+    }
+
+    loadSectionName();
+  }, [params.sectionId]);
+
   // Determine active route for highlight in nav
   const isActiveRoute = (path: string) => {
     return location.pathname === path;
@@ -274,10 +304,14 @@ export default function Dashboard() {
         <header className="bg-white shadow">
           <div className="flex items-center py-12 px-6 pb-2">
             <h1 className="text-2xl font-bold text-gray-900">
-              {isActiveRoute('/dashboard') && 'Dashboard'}
-              {isActiveRoute('/dashboard/new') && 'New Application'}
-              {isActiveRoute('/dashboard/unsubmitted') && 'Unsubmitted Applications'}
-              {isActiveRoute('/dashboard/submitted') && 'Submitted Applications'}
+              {sectionName || (
+                <>
+                  {isActiveRoute('/dashboard') && 'Dashboard'}
+                  {isActiveRoute('/dashboard/new') && 'New Application'}
+                  {isActiveRoute('/dashboard/unsubmitted') && 'Unsubmitted Applications'}
+                  {isActiveRoute('/dashboard/submitted') && 'Submitted Applications'}
+                </>
+              )}
             </h1>
           </div>
         </header>

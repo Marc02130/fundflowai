@@ -17,7 +17,10 @@ const clientOptions = {
     schema: 'public'
   },
   global: {
-    headers: { 'x-my-custom-header': 'fundflowai' }
+    headers: { 
+      'x-my-custom-header': 'fundflowai',
+      'Accept': 'application/json'
+    }
   },
   realtime: {
     params: {

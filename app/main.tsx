@@ -12,6 +12,7 @@ import DashboardHome from './routes/dashboard.home';
 import Profile from './routes/dashboard.profile';
 import NewApplication from './routes/dashboard.new';
 import ApplicationView from './routes/dashboard.applications.$id';
+import SectionEditor from './routes/dashboard.applications.$id.sections.$sectionId';
 
 const router = createBrowserRouter([
   {
@@ -41,6 +42,12 @@ const router = createBrowserRouter([
       {
         path: 'applications/:id',
         element: <ApplicationView />,
+        errorElement: <div>Error loading application</div>
+      },
+      {
+        path: 'applications/:id/sections/:sectionId',
+        element: <SectionEditor />,
+        errorElement: <div>Error loading section</div>
       },
     ],
   },

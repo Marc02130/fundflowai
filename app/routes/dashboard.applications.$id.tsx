@@ -39,6 +39,7 @@ interface Attachment {
   size: number;
   type: string;
   uploadedAt: Date;
+  file_path: string;
 }
 
 export default function GrantApplicationView() {
@@ -65,6 +66,11 @@ export default function GrantApplicationView() {
 
         if (appError) throw appError;
         setApplication(appData);
+
+        // Get file metadata from storage
+        const { data: storageFiles } = await supabase.storage
+          .from('grant-attachments')
+          .list(appData.id);
 
         // Fetch sections with their completion status
         const { data, error: sectionsError } = await supabase
@@ -94,6 +100,29 @@ export default function GrantApplicationView() {
         }));
 
         setSections(transformedSections);
+
+        // Load existing attachments
+        const { data: documentData, error: documentError } = await supabase
+          .from('grant_application_documents')
+          .select('*')
+          .eq('grant_application_id', id);
+
+        if (documentError) throw documentError;
+
+        // Transform into attachments format with size from storage metadata
+        const attachmentsList = documentData?.map(doc => {
+          const storageFile = storageFiles?.find(f => f.name === doc.file_path.split('/').pop());
+          return {
+            id: doc.id,
+            name: doc.file_name,
+            size: storageFile?.metadata?.size || 0,
+            type: doc.file_type,
+            uploadedAt: new Date(doc.created_at),
+            file_path: doc.file_path
+          };
+        }) || [];
+
+        setAttachments(attachmentsList);
       } catch (err) {
         console.error('Error fetching application data:', err);
         setError('Failed to load application');
@@ -147,13 +176,26 @@ export default function GrantApplicationView() {
 
         if (uploadError) throw uploadError;
 
+        // Create document record
+        const { error: documentError } = await supabase
+          .from('grant_application_documents')
+          .insert({
+            grant_application_id: application.id,
+            file_name: file.name,
+            file_type: file.type.split('/').pop()?.toLowerCase() || 'other',
+            file_path: filePath
+          });
+
+        if (documentError) throw documentError;
+
         // Add to attachments list
         setAttachments(prev => [...prev, {
           id: fileId,
           name: file.name,
           size: file.size,
           type: file.type,
-          uploadedAt: new Date()
+          uploadedAt: new Date(),
+          file_path: filePath
         }]);
       }
     } catch (err) {
@@ -183,11 +225,43 @@ export default function GrantApplicationView() {
 
       if (deleteError) throw deleteError;
 
+      // Delete from database
+      const { error: dbError } = await supabase
+        .from('grant_application_documents')
+        .delete()
+        .eq('id', attachmentId);
+
+      if (dbError) throw dbError;
+
       // Remove from attachments list
       setAttachments(prev => prev.filter(a => a.id !== attachmentId));
     } catch (err) {
       console.error('Error deleting attachment:', err);
       setError('Failed to delete attachment');
+    }
+  };
+
+  const handleDownload = async (attachment: Attachment) => {
+    try {
+      const { data, error } = await supabase.storage
+        .from('grant-attachments')
+        .download(attachment.file_path);
+
+      if (error) throw error;
+
+      // Create download link
+      const url = URL.createObjectURL(data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = attachment.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+    } catch (err) {
+      console.error('Error downloading file:', err);
+      setError('Failed to download file');
     }
   };
 
@@ -362,7 +436,7 @@ export default function GrantApplicationView() {
                     )}
                     <button
                       className="ml-4 text-sm text-blue-600 hover:text-blue-800"
-                      onClick={() => {/* TODO: Implement edit functionality */}}
+                      onClick={() => navigate(`/dashboard/applications/${id}/sections/${section.id}`)}
                     >
                       Edit
                     </button>
@@ -391,12 +465,20 @@ export default function GrantApplicationView() {
                       </p>
                     </div>
                   </div>
-                  <button
-                    onClick={() => handleDeleteAttachment(attachment.id)}
-                    className="ml-4 text-sm font-medium text-red-600 hover:text-red-500"
-                  >
-                    Delete
-                  </button>
+                  <div className="flex items-center space-x-3">
+                    <button
+                      onClick={() => handleDownload(attachment)}
+                      className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
+                    >
+                      Download
+                    </button>
+                    <button
+                      onClick={() => handleDeleteAttachment(attachment.id)}
+                      className="text-sm font-medium text-red-600 hover:text-red-500"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
