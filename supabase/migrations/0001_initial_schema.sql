@@ -171,8 +171,7 @@ create table public.grant_opportunities (
 create index IF not exists idx_grant_opportunities_announcement_number on public.grant_opportunities using btree (announcement_number) TABLESPACE pg_default;
 create index IF not exists idx_grant_opportunities_grant_id on public.grant_opportunities using btree (grant_id) TABLESPACE pg_default;
 
--- Create grant_applications table
-create table public.grant_applications (
+-- Create grant_applications tablecreate table public.grant_applications (
   id uuid not null default gen_random_uuid (),
   user_profiles_id uuid not null,
   title character varying(255) null,
@@ -184,11 +183,14 @@ create table public.grant_applications (
   deleted_at timestamp without time zone null,
   resubmission boolean null default false,
   grant_opportunity_id uuid not null,
+  description text null,
   constraint grant_applications_pkey primary key (id),
   constraint grant_applications_grant_opportunity_id_fkey foreign KEY (grant_opportunity_id) references grant_opportunities (id),
   constraint grant_applications_user_profiles_id_fkey foreign KEY (user_profiles_id) references user_profiles (id)
 ) TABLESPACE pg_default;
+
 create index IF not exists idx_grant_applications_opportunity_id on public.grant_applications using btree (grant_opportunity_id) TABLESPACE pg_default;
+
 
 -- Create grant_application_documents table
 create table public.grant_application_documents (

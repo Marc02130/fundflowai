@@ -22,7 +22,7 @@ export default function Home() {
       <nav className="py-6 relative z-50">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <Link to="/" className="flex items-center">
-              <img className="h-10 w-auto" src="/logo.svg?v=1" alt="Fund Flow AI" />
+              <img className="h-16 w-auto" src="/logo.svg?v=1" alt="Fund Flow AI" />
           </Link>
           {!user && (
             <Link to="/auth" className="text-sm font-semibold text-indigo-600 hover:text-indigo-800">

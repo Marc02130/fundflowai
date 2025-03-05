@@ -7,7 +7,47 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const clientOptions = {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true
+  },
+  db: {
+    schema: 'public'
+  },
+  global: {
+    headers: { 'x-my-custom-header': 'fundflowai' }
+  },
+  realtime: {
+    params: {
+      eventsPerSecond: 10
+    }
+  }
+};
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, clientOptions);
+
+// Handle visibility changes
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible') {
+      try {
+        // Instead of creating a new client, reset the connection of the existing one
+        await supabase.realtime.disconnect();
+        await supabase.realtime.connect();
+        
+        // Re-authenticate if needed
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          await supabase.auth.refreshSession();
+        }
+      } catch (error) {
+        console.error('Error resetting Supabase connection:', error);
+      }
+    }
+  });
+}
 
 // Helper function to create a user profile after signup
 export async function createUserProfile(userId: string) {

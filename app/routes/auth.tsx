@@ -113,7 +113,7 @@ export default function Auth() {
       <nav className="py-6">
         <div className="max-w-4xl mx-auto px-4">
           <Link to="/" className="flex items-center">
-            <img className="h-10 w-auto" src="/logo.svg?v=1" alt="Fund Flow AI" />
+            <img className="h-16 w-auto" src="/logo.svg?v=1" alt="Fund Flow AI" />
           </Link>
         </div>
       </nav>

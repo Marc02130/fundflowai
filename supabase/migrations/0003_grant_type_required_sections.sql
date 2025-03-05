@@ -16,3 +16,40 @@ CREATE INDEX idx_grant_type_required_sections_grant_type_id ON public.grant_type
 CREATE INDEX idx_grant_type_required_sections_grant_section_id ON public.grant_type_required_sections USING btree (grant_section_id) TABLESPACE pg_default;
 
 COMMENT ON TABLE public.grant_type_required_sections IS 'Junction table linking grant types to their required sections';
+
+-- Enable RLS
+ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+
+-- Create policy for uploading files
+CREATE POLICY "Users can upload files to their own application folders" ON storage.objects
+FOR INSERT TO authenticated
+WITH CHECK (
+  -- Extract application ID from path (format: {application_id}/{file_id}-{filename})
+  SPLIT_PART(name, '/', 1) IN (
+    SELECT id::text 
+    FROM grant_applications 
+    WHERE user_profiles_id = auth.uid()
+  )
+);
+
+-- Create policy for viewing/downloading files
+CREATE POLICY "Users can view files in their own application folders" ON storage.objects
+FOR SELECT TO authenticated
+USING (
+  SPLIT_PART(name, '/', 1) IN (
+    SELECT id::text 
+    FROM grant_applications 
+    WHERE user_profiles_id = auth.uid()
+  )
+);
+
+-- Create policy for deleting files
+CREATE POLICY "Users can delete files in their own application folders" ON storage.objects
+FOR DELETE TO authenticated
+USING (
+  SPLIT_PART(name, '/', 1) IN (
+    SELECT id::text 
+    FROM grant_applications 
+    WHERE user_profiles_id = auth.uid()
+  )
+);

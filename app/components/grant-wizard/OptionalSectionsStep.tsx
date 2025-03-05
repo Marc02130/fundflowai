@@ -5,28 +5,61 @@ interface Section {
   id: string;
   name: string;
   description: string | null;
+  flow_order?: number;
 }
 
 interface OptionalSectionsStepProps {
-  grantId: string;
   onNext: (data: { selectedSections: string[] }) => void;
+  onSave: (data: { selectedSections?: string[], grantId: string }) => void;
+  initialData?: {
+    selectedSections?: string[];
+    opportunityId?: string;
+  };
 }
 
-export default function OptionalSectionsStep({ grantId, onNext }: OptionalSectionsStepProps) {
+export default function OptionalSectionsStep({ onNext, onSave, initialData }: OptionalSectionsStepProps) {
+  const opportunityId = initialData?.opportunityId;
   const [sections, setSections] = useState<Section[]>([]);
-  const [selectedSections, setSelectedSections] = useState<string[]>([]);
+  const [selectedSections, setSelectedSections] = useState<string[]>(initialData?.selectedSections || []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Fetch optional sections for the grant
   useEffect(() => {
     async function fetchSections() {
+      if (!opportunityId) {
+        setError('No opportunity selected');
+        setLoading(false);
+        return;
+      }
+
       try {
+        // First get the grant_id
+        const { data: opportunityData, error: opportunityError } = await supabase
+          .from('grant_opportunities')
+          .select('grant_id')
+          .eq('id', opportunityId)
+          .single();
+
+        if (opportunityError) throw opportunityError;
+        if (!opportunityData?.grant_id) {
+          throw new Error('No grant_id found for opportunity');
+        }
+
+        // Save the grant_id to wizard data
+        onSave({ grantId: opportunityData.grant_id });
+
+        // Then get the sections
         const { data, error } = await supabase
           .from('grant_sections')
-          .select('id, name, description')
-          .eq('grant_id', grantId)
+          .select(`
+            id,
+            name,
+            description,
+            flow_order
+          `)
           .eq('optional', true)
+          .eq('grant_id', opportunityData.grant_id)
           .order('flow_order');
 
         if (error) throw error;
@@ -40,7 +73,7 @@ export default function OptionalSectionsStep({ grantId, onNext }: OptionalSectio
     }
 
     fetchSections();
-  }, [grantId]);
+  }, [opportunityId, onSave]);
 
   const handleNext = () => {
     return new Promise<void>((resolve) => {

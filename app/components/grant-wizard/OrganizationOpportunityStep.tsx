@@ -14,18 +14,28 @@ interface GrantOpportunity {
 }
 
 interface OrganizationOpportunityStepProps {
-  onNext: (data: { organizationId: string, opportunityId: string }) => void;
+  onNext: (data: { 
+    organizationId: string;
+    opportunityId: string;
+    searchTerm: string;
+  }) => void;
+  initialData?: {
+    organizationId?: string;
+    opportunityId?: string;
+    searchTerm?: string;
+  };
 }
 
-export default function OrganizationOpportunityStep({ onNext }: OrganizationOpportunityStepProps) {
+export default function OrganizationOpportunityStep({ onNext, initialData }: OrganizationOpportunityStepProps) {
   console.log('OrganizationOpportunityStep render');
 
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [opportunities, setOpportunities] = useState<GrantOpportunity[]>([]);
-  const [selectedOrganization, setSelectedOrganization] = useState<string>('');
-  const [selectedOpportunity, setSelectedOpportunity] = useState<string>('');
-  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedOrganization, setSelectedOrganization] = useState<string>(initialData?.organizationId || '');
+  const [selectedOpportunity, setSelectedOpportunity] = useState<string>(initialData?.opportunityId || '');
+  const [searchTerm, setSearchTerm] = useState(initialData?.searchTerm || '');
   const [loading, setLoading] = useState(true);
+  const [loadingOpportunities, setLoadingOpportunities] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Expose state values for the parent component
@@ -36,7 +46,8 @@ export default function OrganizationOpportunityStep({ onNext }: OrganizationOppo
       if (selectedOrganization && selectedOpportunity) {
         onNext({
           organizationId: selectedOrganization,
-          opportunityId: selectedOpportunity
+          opportunityId: selectedOpportunity,
+          searchTerm: searchTerm
         });
       }
     }
@@ -44,6 +55,8 @@ export default function OrganizationOpportunityStep({ onNext }: OrganizationOppo
 
   // Fetch organizations on component mount
   useEffect(() => {
+    let isMounted = true;
+
     async function fetchOrganizations() {
       try {
         console.log('Fetching organizations');
@@ -54,29 +67,35 @@ export default function OrganizationOpportunityStep({ onNext }: OrganizationOppo
           .order('name');
 
         if (error) throw error;
-        console.log('Fetched organizations:', data);
-        setOrganizations(data || []);
+        if (isMounted) {
+          console.log('Fetched organizations:', data);
+          setOrganizations(data || []);
+          setLoading(false);
+        }
       } catch (err) {
-        setError('Failed to load organizations');
-        console.error('Error fetching organizations:', err);
-      } finally {
-        setLoading(false);
+        if (isMounted) {
+          setError('Failed to load organizations');
+          console.error('Error fetching organizations:', err);
+          setLoading(false);
+        }
       }
     }
 
     fetchOrganizations();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  // Fetch opportunities when organization is selected and search term is >= 3 characters
+  // Fetch opportunities when organization changes or on initial load with initialData
   useEffect(() => {
-    async function fetchOpportunities() {
-      if (!selectedOrganization || searchTerm.length < 3) {
-        setOpportunities([]);
-        setLoading(false);
-        return;
-      }
+    let isMounted = true;
 
-      setLoading(true);
+    async function fetchOpportunities() {
+      if (!selectedOrganization) return;
+
+      setLoadingOpportunities(true);
       try {
         console.log('Fetching opportunities for organization:', selectedOrganization);
         const { data, error } = await supabase
@@ -86,46 +105,50 @@ export default function OrganizationOpportunityStep({ onNext }: OrganizationOppo
             title,
             announcement_number,
             expiration_date,
-            grant_id,
             grants!inner (
               organization_id
             )
           `)
           .eq('grants.organization_id', selectedOrganization)
           .gte('expiration_date', new Date().toISOString())
-          .or(`title.ilike.%${searchTerm}%,announcement_number.ilike.%${searchTerm}%`)
-          .order('expiration_date');
+          .order('title');
 
         if (error) throw error;
-        console.log('Fetched opportunities:', data);
-        setOpportunities(data || []);
+        if (isMounted) {
+          console.log('Fetched opportunities:', data);
+          setOpportunities(data || []);
+          setLoadingOpportunities(false);
+        }
       } catch (err) {
-        setError('Failed to load opportunities');
-        console.error('Error fetching opportunities:', err);
-      } finally {
-        setLoading(false);
+        if (isMounted) {
+          console.error('Error fetching opportunities:', err);
+          setError('Failed to load opportunities');
+          setLoadingOpportunities(false);
+        }
       }
     }
 
     fetchOpportunities();
-  }, [selectedOrganization, searchTerm]);
 
-  // Remove the separate filter since we're now filtering in the query
-  const filteredOpportunities = opportunities;
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedOrganization]);
 
-  const handleNext = () => {
-    console.log('OrganizationOpportunityStep handleNext called');
-    console.log('Selected organization:', selectedOrganization);
-    console.log('Selected opportunity:', selectedOpportunity);
+  // Filter opportunities based on search term
+  const filteredOpportunities = opportunities.filter(opp => {
+    if (searchTerm.length < 3) return false;
+    const searchLower = searchTerm.toLowerCase();
+    return (
+      opp.title.toLowerCase().includes(searchLower) ||
+      opp.announcement_number.toLowerCase().includes(searchLower)
+    );
+  });
 
-    if (selectedOrganization && selectedOpportunity) {
-      const data = {
-        organizationId: selectedOrganization,
-        opportunityId: selectedOpportunity
-      };
-      console.log('Calling onNext with data:', data);
-      onNext(data);
-    }
+  const handleOrganizationChange = (orgId: string) => {
+    setSelectedOrganization(orgId);
+    setSelectedOpportunity('');
+    setSearchTerm('');
   };
 
   if (error) {
@@ -142,8 +165,16 @@ export default function OrganizationOpportunityStep({ onNext }: OrganizationOppo
     );
   }
 
+  if (loading) {
+    return (
+      <div className="text-center text-gray-500 py-8">
+        Loading organizations...
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-4xl mx-auto">
       {/* Organization Selection */}
       <div>
         <label htmlFor="organization" className="block text-sm font-medium text-gray-700">
@@ -152,14 +183,8 @@ export default function OrganizationOpportunityStep({ onNext }: OrganizationOppo
         <select
           id="organization"
           value={selectedOrganization}
-          onChange={(e) => {
-            console.log('Organization selected:', e.target.value);
-            setSelectedOrganization(e.target.value);
-            setSelectedOpportunity('');
-            setSearchTerm('');
-          }}
+          onChange={(e) => handleOrganizationChange(e.target.value)}
           className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
-          required
         >
           <option value="">Select an organization</option>
           {organizations.map((org) => (
@@ -170,7 +195,6 @@ export default function OrganizationOpportunityStep({ onNext }: OrganizationOppo
         </select>
       </div>
 
-      {/* Opportunity Search and Selection */}
       {selectedOrganization && (
         <div className="space-y-4">
           <div>
@@ -193,7 +217,7 @@ export default function OrganizationOpportunityStep({ onNext }: OrganizationOppo
           </div>
 
           <div className="bg-white shadow overflow-hidden rounded-md">
-            {loading ? (
+            {loadingOpportunities ? (
               <div className="p-4 text-center text-gray-500">Loading opportunities...</div>
             ) : searchTerm.length < 3 ? (
               <div className="p-4 text-center text-gray-500">
@@ -205,7 +229,7 @@ export default function OrganizationOpportunityStep({ onNext }: OrganizationOppo
               </div>
             ) : (
               <ul className="divide-y divide-gray-200">
-                {opportunities.map((opp) => (
+                {filteredOpportunities.map((opp) => (
                   <li key={opp.id}>
                     <label className="block hover:bg-gray-50 cursor-pointer">
                       <div className="px-4 py-4 sm:px-6">
@@ -215,19 +239,17 @@ export default function OrganizationOpportunityStep({ onNext }: OrganizationOppo
                             name="opportunity"
                             value={opp.id}
                             checked={selectedOpportunity === opp.id}
-                            onChange={(e) => {
-                              console.log('Opportunity selected:', e.target.value);
-                              setSelectedOpportunity(e.target.value);
-                            }}
+                            onChange={() => setSelectedOpportunity(opp.id)}
                             className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
                           />
                           <div className="ml-3">
-                            <div className="text-sm font-medium text-gray-900">
-                              {opp.title}
-                            </div>
-                            <div className="text-sm text-gray-500">
-                              {opp.announcement_number} · Expires: {new Date(opp.expiration_date).toLocaleDateString()}
-                            </div>
+                            <p className="text-sm font-medium text-gray-900">{opp.title}</p>
+                            <p className="text-sm text-gray-500">
+                              Announcement: {opp.announcement_number}
+                            </p>
+                            <p className="text-sm text-gray-500">
+                              Expires: {new Date(opp.expiration_date).toLocaleDateString()}
+                            </p>
                           </div>
                         </div>
                       </div>

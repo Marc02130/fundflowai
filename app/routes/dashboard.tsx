@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate, Link, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '~/context/AuthContext';
 import type { Route } from '~/+types/auth';
-import { supabase } from '~/lib/supabase'; 
+import { supabase } from '~/lib/supabase';
+import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -25,10 +26,47 @@ export default function Dashboard() {
     return location.pathname === path;
   };
 
+  // Add focus event listener to refresh applications
+  useEffect(() => {
+    if (user) {
+      const handleFocus = () => {
+        fetchInProgressApplications();
+      };
+
+      window.addEventListener('focus', handleFocus);
+      return () => {
+        window.removeEventListener('focus', handleFocus);
+      };
+    }
+  }, [user]);
+
   // Fetch in-progress applications on mount and when user changes
   useEffect(() => {
     if (user) {
       fetchInProgressApplications();
+
+      // Subscribe to changes in grant_applications table
+      const subscription = supabase
+        .channel('grant_applications_changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'grant_applications',
+            filter: `user_profiles_id=eq.${user.id}`
+          },
+          () => {
+            // Refresh the list on any change to user's applications
+            fetchInProgressApplications();
+          }
+        )
+        .subscribe();
+
+      // Cleanup subscription on unmount
+      return () => {
+        subscription.unsubscribe();
+      };
     }
   }, [user]);
 
@@ -65,7 +103,7 @@ export default function Dashboard() {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center">
-          <svg className="mx-auto h-12 w-12 animate-spin text-indigo-600" fill="none" viewBox="0 0 36 36">
+          <svg className="mx-auto h-12 w-12 animate-spin text-indigo-600" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
           </svg>
@@ -83,20 +121,20 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen flex">
       {/* Left navigation sidebar with collapse functionality */}
-      <div className={`${navCollapsed ? 'w-12' : 'w-48'} border-r border-gray-200 min-h-screen transition-all duration-300 relative`}>
-        <div className="p-4 border-b border-gray-200 flex justify-between items-center">
-          {!navCollapsed && (
-            <Link to="/" className="flex items-center">
-              <img className="h-8 w-auto" src="/logo.svg?v=1" alt="Fund Flow AI" />
-            </Link>
-          )}
+      <div className={`${navCollapsed ? 'w-12' : 'w-64'} border-r border-gray-200 min-h-screen transition-all duration-300 relative`}>
+        <div className="py-8 pb-2 px-6 border-b border-gray-200 relative">
           <button 
             onClick={() => setNavCollapsed(!navCollapsed)} 
-            className="p-2 rounded-md hover:bg-gray-100 transition-colors !text-2xl"
+            className="absolute top-2 right-2 p-1 rounded-md hover:bg-gray-100 transition-colors text-sm"
             aria-label={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {navCollapsed ? '→' : '←'}
           </button>
+          {!navCollapsed && (
+            <Link to="/dashboard" className="flex items-center">
+              <img className="h-12 w-auto" src="/logo.svg?v=1" alt="Fund Flow AI" />
+            </Link>
+          )}
         </div>
         
         <nav className="py-8">
@@ -104,39 +142,48 @@ export default function Dashboard() {
             <li className="mb-2">
               <Link 
                 to="/dashboard" 
-                className={`flex items-center px-4 py-3 text-2xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard') ? 'bg-gray-200 font-semibold' : ''}`}
+                className={`flex items-center px-4 py-3 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard') ? 'bg-gray-200 font-semibold' : ''}`}
                 title="Home"
               >
-                <span className="text-2xl shrink-0">⌂</span>
+                <span className="text-xl shrink-0">⌂</span>
                 {!navCollapsed && <span className="ml-3">Home</span>}
               </Link>
             </li>
+
+            {/* Applications Section */}
+            {!navCollapsed && (
+              <li className="mb-2 mt-6">
+                <div className="px-4 py-3 text-xl">
+                  Applications
+                </div>
+              </li>
+            )}
             
-            <li className="mb-2">
+            <li className="mb-2 pl-4">
               <Link 
                 to="/dashboard/new" 
-                className={`flex items-center px-4 py-3 text-2xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/new') ? 'bg-gray-200 font-semibold' : ''}`}
+                className={`flex items-center px-4 py-3 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/new') ? 'bg-gray-200 font-semibold' : ''}`}
                 title="New Application"
               >
-                <span className="text-2xl shrink-0">+</span>
-                {!navCollapsed && <span className="ml-3">New Application</span>}
+                <span className="text-xl shrink-0">+</span>
+                {!navCollapsed && <span className="ml-3">New</span>}
               </Link>
             </li>
 
             {/* Unsubmitted Applications - pure accordion */}
-            <li className="mb-2">
+            <li className="mb-2 pl-4">
               <div 
-                className={`flex items-start px-4 py-3 text-2xl hover:bg-gray-200 rounded-md min-h-14 transition-colors cursor-pointer ${inProgressApplications.length > 0 ? 'bg-gray-100' : ''}`}
+                className={`flex items-start px-4 py-3 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors cursor-pointer ${inProgressApplications.length > 0 ? 'bg-gray-100' : ''}`}
                 onClick={() => setIsUnsubmittedExpanded(!isUnsubmittedExpanded)}
                 title="Unsubmitted Applications"
               >
-                <span className="text-2xl shrink-0">○</span>
+                <span className="text-xl shrink-0">○</span>
                 {!navCollapsed && (
                   <>
-                    <span className="ml-3 break-words">
-                      Unsubmitted Applications
+                    <span className="ml-3 break-words flex-grow">
+                      Unsubmitted
                     </span>
-                    <span className="ml-auto text-2xl transition-transform shrink-0">
+                    <span className="text-xl transition-transform shrink-0">
                       {isUnsubmittedExpanded ? '▾' : '▸'}
                     </span>
                   </>
@@ -147,7 +194,7 @@ export default function Dashboard() {
               {isUnsubmittedExpanded && (
                 <ul className={`mt-2 flex flex-col gap-2 ${navCollapsed ? 'pl-3' : 'pl-8'}`}>
                   {isLoading ? (
-                    <li className="px-3 py-2 text-2xl text-gray-500">
+                    <li className="px-3 py-2 text-xl text-gray-500">
                       {!navCollapsed && (
                         <div className="flex items-center">
                           <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
@@ -164,7 +211,7 @@ export default function Dashboard() {
                         <li key={app.id} className="mb-2">
                           <Link 
                             to={`/dashboard/applications/${app.id}`}
-                            className="block px-3 py-2 rounded-md hover:bg-gray-100 transition-colors text-gray-900 text-2xl"
+                            className="block px-3 py-2 rounded-md hover:bg-gray-100 transition-colors text-gray-900 text-xl"
                           >
                             {app.title}
                           </Link>
@@ -172,7 +219,7 @@ export default function Dashboard() {
                       ))}
                     </>
                   ) : (
-                    <li className="px-3 py-2 text-2xl text-gray-500">
+                    <li className="px-3 py-2 text-xl text-gray-500">
                       {!navCollapsed && "No applications"}
                     </li>
                   )}
@@ -180,14 +227,14 @@ export default function Dashboard() {
               )}
             </li>
 
-            <li className="mb-2">
+            <li className="mb-2 pl-4">
               <Link 
                 to="/dashboard/submitted" 
-                className={`flex items-start px-4 py-3 text-2xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/submitted') ? 'bg-gray-200 font-semibold' : ''}`}
+                className={`flex items-start px-4 py-3 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/submitted') ? 'bg-gray-200 font-semibold' : ''}`}
                 title="Submitted Applications"
               >
-                <span className="text-2xl shrink-0">●</span>
-                {!navCollapsed && <span className="ml-3 break-words">Submitted Applications</span>}
+                <span className="text-xl shrink-0">●</span>
+                {!navCollapsed && <span className="ml-3 break-words">Submitted</span>}
               </Link>
             </li>
 
@@ -195,10 +242,10 @@ export default function Dashboard() {
             <li className="mb-2 mt-6">
               <Link 
                 to="/dashboard/profile" 
-                className={`flex items-center px-4 py-3 text-2xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/profile') ? 'bg-gray-200 font-semibold' : ''}`}
+                className={`flex items-center px-4 py-3 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/profile') ? 'bg-gray-200 font-semibold' : ''}`}
                 title="Profile"
               >
-                <span className="text-2xl shrink-0">◆</span>
+                <span className="text-xl shrink-0">◆</span>
                 {!navCollapsed && <span className="ml-3">Profile</span>}
               </Link>
             </li>
@@ -211,10 +258,10 @@ export default function Dashboard() {
                   signOut();
                   navigate('/');
                 }}
-                className="flex items-center px-4 py-3 text-2xl hover:bg-gray-200 rounded-md min-h-14 transition-colors"
+                className="flex items-center px-4 py-3 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors"
                 title="Sign out"
               >
-                <span className="text-2xl shrink-0">⤴</span>
+                <span className="text-xl shrink-0">⤴</span>
                 {!navCollapsed && <span className="ml-3">Sign out</span>}
               </Link>
             </li>
@@ -225,7 +272,7 @@ export default function Dashboard() {
       {/* Main content area */}
       <div className="flex-1">
         <header className="bg-white shadow">
-          <div className="h-[72px] flex items-end px-4 pb-4">
+          <div className="flex items-center py-12 px-6 pb-2">
             <h1 className="text-2xl font-bold text-gray-900">
               {isActiveRoute('/dashboard') && 'Dashboard'}
               {isActiveRoute('/dashboard/new') && 'New Application'}

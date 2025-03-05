@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import React from 'react';
 
@@ -12,15 +12,79 @@ interface WizardContainerProps {
   onComplete: (data: any) => void;
 }
 
-export default function WizardContainer({ steps, onComplete }: WizardContainerProps) {
-  const [currentStep, setCurrentStep] = useState(0);
-  const [formData, setFormData] = useState<any>({});
+export const WIZARD_STATE_KEY = 'grant_wizard_state';
 
-  const currentComponent = steps[currentStep].component;
+export default function WizardContainer({ steps, onComplete }: WizardContainerProps) {
+  // Initialize state from localStorage if it exists
+  const [currentStep, setCurrentStep] = useState(() => {
+    const saved = localStorage.getItem(WIZARD_STATE_KEY);
+    if (saved) {
+      const { step } = JSON.parse(saved);
+      return step || 0;
+    }
+    return 0;
+  });
+
+  const [formData, setFormData] = useState<any>(() => {
+    const saved = localStorage.getItem(WIZARD_STATE_KEY);
+    if (saved) {
+      const { data } = JSON.parse(saved);
+      return data || {};
+    }
+    return {};
+  });
+
+  // Save state when it changes
+  useEffect(() => {
+    localStorage.setItem(WIZARD_STATE_KEY, JSON.stringify({
+      step: currentStep,
+      data: formData
+    }));
+  }, [currentStep, formData]);
+
+  const currentComponent = useMemo(() => steps[currentStep].component, [steps, currentStep]);
 
   const handleBack = () => {
     if (currentStep > 0) {
       setCurrentStep(currentStep - 1);
+    }
+  };
+
+  // Save form data without navigation
+  const saveFormData = (stepData: any) => {
+    const newFormData = { ...formData, ...stepData };
+    setFormData(newFormData);
+  };
+
+  const handleNext = async () => {
+    console.log('Next button clicked');
+    const stepState = (window as any).currentStepState;
+    if (stepState?.handleNext) {
+      console.log('Calling stepState.handleNext');
+      try {
+        await stepState.handleNext();
+        // Only advance to next step after successful validation
+        if (currentStep === steps.length - 1) {
+          console.log('Completing wizard');
+          await handleComplete(formData);
+        } else {
+          console.log('Moving to next step');
+          setCurrentStep(currentStep + 1);
+        }
+      } catch (error) {
+        console.error('Error in handleNext:', error);
+      }
+    }
+  };
+
+  const handleComplete = async (finalData: any) => {
+    try {
+      await onComplete(finalData);
+      // Clear wizard state after successful completion
+      localStorage.removeItem(WIZARD_STATE_KEY);
+    } catch (error) {
+      console.error('Error completing wizard:', error);
+      throw error;
     }
   };
 
@@ -66,14 +130,7 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
           <div>
             {currentComponent && (
               <button
-                onClick={() => {
-                  console.log('Next button clicked');
-                  const stepState = (window as any).currentStepState;
-                  if (stepState?.handleNext) {
-                    console.log('Calling stepState.handleNext');
-                    stepState.handleNext();
-                  }
-                }}
+                onClick={handleNext}
                 className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
               >
                 Next
@@ -98,18 +155,12 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
                   console.log('Calling component onNext prop');
                   await (currentComponent as any).props.onNext(stepData);
                 }
-                
-                if (currentStep === steps.length - 1) {
-                  console.log('Completing wizard');
-                  await onComplete(newFormData);
-                } else {
-                  console.log('Moving to next step');
-                  setCurrentStep(currentStep + 1);
-                }
               } catch (error) {
                 console.error('Error in step transition:', error);
               }
-            }
+            },
+            onSave: saveFormData,
+            initialData: formData
           })
         ) : (
           <div className="text-center py-8">

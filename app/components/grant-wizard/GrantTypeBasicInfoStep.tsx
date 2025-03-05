@@ -8,28 +8,62 @@ interface GrantType {
 }
 
 interface GrantTypeBasicInfoStepProps {
-  organizationId: string;
   onNext: (data: {
     title: string;
     description: string;
     grantTypeId: string;
     resubmission: boolean;
+    amount_requested?: number;
   }) => void;
+  onSave: (data: {
+    title: string;
+    description: string;
+    grantTypeId: string;
+    resubmission: boolean;
+    amount_requested?: number;
+  }) => void;
+  initialData?: {
+    title?: string;
+    description?: string;
+    grantTypeId?: string;
+    resubmission?: boolean;
+    amount_requested?: number;
+    organizationId?: string;
+  };
 }
 
-export default function GrantTypeBasicInfoStep({ organizationId, onNext }: GrantTypeBasicInfoStepProps) {
+export default function GrantTypeBasicInfoStep({ 
+  onNext, 
+  onSave,
+  initialData 
+}: GrantTypeBasicInfoStepProps) {
+  const organizationId = initialData?.organizationId;
   console.log('GrantTypeBasicInfoStep render with organizationId:', organizationId);
+  console.log('Initial data:', initialData);
 
   const [grantTypes, setGrantTypes] = useState<GrantType[]>([]);
-  const [selectedType, setSelectedType] = useState('');
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [resubmission, setResubmission] = useState(false);
+  const [selectedType, setSelectedType] = useState(initialData?.grantTypeId || '');
+  const [title, setTitle] = useState(initialData?.title || '');
+  const [description, setDescription] = useState(initialData?.description || '');
+  const [resubmission, setResubmission] = useState(initialData?.resubmission || false);
+  const [amountRequested, setAmountRequested] = useState(initialData?.amount_requested || 0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Update state when initialData changes
+  useEffect(() => {
+    if (initialData) {
+      setTitle(initialData.title || '');
+      setDescription(initialData.description || '');
+      setSelectedType(initialData.grantTypeId || '');
+      setResubmission(initialData.resubmission || false);
+      setAmountRequested(initialData.amount_requested || 0);
+    }
+  }, [initialData]);
+
   // Fetch grant types for the selected organization
   useEffect(() => {
+    let isMounted = true;
     console.log('GrantTypeBasicInfoStep useEffect running with organizationId:', organizationId);
     
     async function fetchGrantTypes() {
@@ -49,19 +83,47 @@ export default function GrantTypeBasicInfoStep({ organizationId, onNext }: Grant
           .order('name');
 
         if (error) throw error;
-        console.log('Fetched grant types:', data);
-        setGrantTypes(data || []);
+        if (isMounted) {
+          console.log('Fetched grant types:', data);
+          setGrantTypes(data || []);
+          setLoading(false);
+        }
       } catch (err) {
-        console.error('Error fetching grant types:', err);
-        setError('Failed to load grant types');
-      } finally {
-        setLoading(false);
+        if (isMounted) {
+          console.error('Error fetching grant types:', err);
+          setError('Failed to load grant types');
+          setLoading(false);
+        }
       }
     }
 
     fetchGrantTypes();
+
+    return () => {
+      isMounted = false;
+    };
   }, [organizationId]);
 
+  // Save current form state
+  const saveFormState = (updates: Partial<{
+    title: string;
+    description: string;
+    grantTypeId: string;
+    resubmission: boolean;
+    amount_requested: number;
+  }>) => {
+    const currentState = {
+      title,
+      description,
+      grantTypeId: selectedType,
+      resubmission,
+      amount_requested: amountRequested
+    };
+    const newState = { ...currentState, ...updates };
+    onSave(newState);
+  };
+
+  // Handle next button click
   const handleNext = () => {
     if (title && description && selectedType) {
       console.log('GrantTypeBasicInfoStep handleNext called with:', {
@@ -69,12 +131,14 @@ export default function GrantTypeBasicInfoStep({ organizationId, onNext }: Grant
         description,
         grantTypeId: selectedType,
         resubmission,
+        amount_requested: amountRequested,
       });
       onNext({
         title,
         description,
         grantTypeId: selectedType,
         resubmission,
+        amount_requested: amountRequested,
       });
     }
   };
@@ -137,7 +201,10 @@ export default function GrantTypeBasicInfoStep({ organizationId, onNext }: Grant
         <select
           id="grantType"
           value={selectedType}
-          onChange={(e) => setSelectedType(e.target.value)}
+          onChange={(e) => {
+            setSelectedType(e.target.value);
+            saveFormState({ grantTypeId: e.target.value });
+          }}
           className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
           required
         >
@@ -155,6 +222,36 @@ export default function GrantTypeBasicInfoStep({ organizationId, onNext }: Grant
         )}
       </div>
 
+      {/* Amount Requested */}
+      <div>
+        <label htmlFor="amount_requested" className="block text-sm font-medium text-gray-700">
+          Amount Requested
+        </label>
+        <div className="mt-1 relative rounded-md shadow-sm">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <span className="text-gray-500 sm:text-sm">$</span>
+          </div>
+          <input
+            type="number"
+            name="amount_requested"
+            id="amount_requested"
+            value={amountRequested || ''}
+            onChange={(e) => {
+              const value = parseFloat(e.target.value);
+              setAmountRequested(value);
+              saveFormState({ amount_requested: value });
+            }}
+            className="mt-1 block w-full pl-7 pr-12 border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+            placeholder="0.00"
+            step="0.01"
+            min="0"
+          />
+          <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+            <span className="text-gray-500 sm:text-sm">USD</span>
+          </div>
+        </div>
+      </div>
+
       {/* Title */}
       <div>
         <label htmlFor="title" className="block text-sm font-medium text-gray-700">
@@ -164,7 +261,10 @@ export default function GrantTypeBasicInfoStep({ organizationId, onNext }: Grant
           type="text"
           id="title"
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => {
+            setTitle(e.target.value);
+            saveFormState({ title: e.target.value });
+          }}
           className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
           required
         />
@@ -181,7 +281,10 @@ export default function GrantTypeBasicInfoStep({ organizationId, onNext }: Grant
         <textarea
           id="description"
           value={description}
-          onChange={(e) => setDescription(e.target.value)}
+          onChange={(e) => {
+            setDescription(e.target.value);
+            saveFormState({ description: e.target.value });
+          }}
           rows={6}
           className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
           required
@@ -194,7 +297,10 @@ export default function GrantTypeBasicInfoStep({ organizationId, onNext }: Grant
           id="resubmission"
           type="checkbox"
           checked={resubmission}
-          onChange={(e) => setResubmission(e.target.checked)}
+          onChange={(e) => {
+            setResubmission(e.target.checked);
+            saveFormState({ resubmission: e.target.checked });
+          }}
           className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
         />
         <label htmlFor="resubmission" className="ml-2 block text-sm text-gray-900">
