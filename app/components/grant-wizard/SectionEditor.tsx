@@ -41,6 +41,26 @@ interface SectionDocument {
   created_at: string;
 }
 
+interface UserPrompt {
+  id: string;
+  name: string;
+  description: string | null;
+  prompt_text: string;
+  is_active: boolean;
+}
+
+interface PromptModalData {
+  isOpen: boolean;
+  mode: 'add' | 'edit';
+  prompt: {
+    id?: string;
+    name: string;
+    description: string;
+    prompt_text: string;
+    is_active: boolean;
+  };
+}
+
 export default function SectionEditor({ sectionId }: SectionEditorProps) {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -59,6 +79,22 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
   // AI processing state
   const [selectedAIFunctions, setSelectedAIFunctions] = useState<string[]>([]);
   const [processing, setProcessing] = useState(false);
+
+  // Add user prompts state
+  const [userPrompts, setUserPrompts] = useState<UserPrompt[]>([]);
+  const [selectedPrompt, setSelectedPrompt] = useState<string>('default');
+  const [loadingPrompts, setLoadingPrompts] = useState(false);
+
+  const [promptModal, setPromptModal] = useState<PromptModalData>({
+    isOpen: false,
+    mode: 'add',
+    prompt: {
+      name: '',
+      description: '',
+      prompt_text: '',
+      is_active: true
+    }
+  });
 
   // Load section data, history, and documents
   useEffect(() => {
@@ -140,6 +176,33 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
 
     loadSectionData();
   }, [sectionId]);
+
+  // Add loadUserPrompts effect
+  useEffect(() => {
+    async function loadUserPrompts() {
+      if (!section?.grant_section.ai_generator_prompt) return;
+      
+      setLoadingPrompts(true);
+      try {
+        const { data, error } = await supabase
+          .from('user_ai_prompts')
+          .select('*')
+          .eq('is_active', true)
+          .is('deleted_at', null)
+          .order('name');
+
+        if (error) throw error;
+        setUserPrompts(data || []);
+      } catch (err) {
+        console.error('Error loading prompts:', err);
+        setError('Failed to load prompts');
+      } finally {
+        setLoadingPrompts(false);
+      }
+    }
+
+    loadUserPrompts();
+  }, [section?.grant_section.ai_generator_prompt]);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -306,6 +369,91 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
     }
   };
 
+  const handleOpenAddPrompt = () => {
+    setPromptModal({
+      isOpen: true,
+      mode: 'add',
+      prompt: {
+        name: '',
+        description: '',
+        prompt_text: section?.grant_section.ai_generator_prompt || '',
+        is_active: true
+      }
+    });
+  };
+
+  const handleOpenEditPrompt = () => {
+    const promptToEdit = userPrompts.find(p => p.id === selectedPrompt);
+    if (!promptToEdit) return;
+
+    setPromptModal({
+      isOpen: true,
+      mode: 'edit',
+      prompt: {
+        id: promptToEdit.id,
+        name: promptToEdit.name,
+        description: promptToEdit.description || '',
+        prompt_text: promptToEdit.prompt_text,
+        is_active: promptToEdit.is_active
+      }
+    });
+  };
+
+  const handleClosePromptModal = () => {
+    setPromptModal(prev => ({ ...prev, isOpen: false }));
+  };
+
+  const handleSavePrompt = async () => {
+    try {
+      // Get current user's ID directly from auth
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('No user found');
+
+      if (promptModal.mode === 'add') {
+        const { error } = await supabase
+          .from('user_ai_prompts')
+          .insert({
+            user_id: user.id, // Use auth user ID directly as profile ID
+            name: promptModal.prompt.name,
+            description: promptModal.prompt.description || null,
+            prompt_text: promptModal.prompt.prompt_text,
+            is_active: promptModal.prompt.is_active,
+            prompt_type: 'generator'
+          });
+
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('user_ai_prompts')
+          .update({
+            name: promptModal.prompt.name,
+            description: promptModal.prompt.description || null,
+            prompt_text: promptModal.prompt.prompt_text,
+            is_active: promptModal.prompt.is_active,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', promptModal.prompt.id);
+
+        if (error) throw error;
+      }
+
+      // Refresh prompts list
+      const { data, error } = await supabase
+        .from('user_ai_prompts')
+        .select('*')
+        .eq('is_active', true)
+        .is('deleted_at', null)
+        .order('name');
+
+      if (error) throw error;
+      setUserPrompts(data || []);
+      handleClosePromptModal();
+    } catch (err) {
+      console.error('Error saving prompt:', err);
+      setError('Failed to save prompt');
+    }
+  };
+
   if (loading) return <div>Loading...</div>;
   if (error) return <div>Error: {error}</div>;
   if (!section || !currentField) return <div>No section data found</div>;
@@ -352,25 +500,135 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
 
             {section.grant_section.ai_generator_prompt && (
               <div className="mb-6">
-                <h3 className="text-sm font-medium text-gray-700 mb-2">AI Functions</h3>
-                <div className="space-y-2">
-                  {section.grant_section.ai_generator_prompt && (
-                    <label className="flex items-center">
+                <h3 className="text-sm font-medium text-gray-700 mb-2">AI Prompts</h3>
+                <div className="flex items-center space-x-2">
+                  <select
+                    value={selectedPrompt}
+                    onChange={(e) => setSelectedPrompt(e.target.value)}
+                    className="flex-1 block rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    disabled={loadingPrompts}
+                  >
+                    <option value="default">Default Section Prompt</option>
+                    {userPrompts.map((prompt) => (
+                      <option key={prompt.id} value={prompt.id}>
+                        {prompt.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={handleOpenAddPrompt}
+                    className="inline-flex items-center px-2.5 py-1.5 border border-gray-300 shadow-sm text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                  >
+                    Add
+                  </button>
+                  <button
+                    onClick={handleOpenEditPrompt}
+                    disabled={selectedPrompt === 'default'}
+                    className="inline-flex items-center px-2.5 py-1.5 border border-gray-300 shadow-sm text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Edit
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Prompt Modal */}
+            {promptModal.isOpen && (
+              <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
+                <div className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 p-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-medium text-gray-900">
+                      {promptModal.mode === 'add' ? 'Add New Prompt' : 'Edit Prompt'}
+                    </h3>
+                    <button
+                      onClick={handleClosePromptModal}
+                      className="text-gray-400 hover:text-gray-500"
+                    >
+                      <span className="sr-only">Close</span>
+                      ×
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <label htmlFor="prompt-name" className="block text-sm font-medium text-gray-700">
+                        Name
+                      </label>
+                      <input
+                        type="text"
+                        id="prompt-name"
+                        value={promptModal.prompt.name}
+                        onChange={(e) => setPromptModal(prev => ({
+                          ...prev,
+                          prompt: { ...prev.prompt, name: e.target.value }
+                        }))}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="prompt-description" className="block text-sm font-medium text-gray-700">
+                        Description (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        id="prompt-description"
+                        value={promptModal.prompt.description}
+                        onChange={(e) => setPromptModal(prev => ({
+                          ...prev,
+                          prompt: { ...prev.prompt, description: e.target.value }
+                        }))}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="prompt-text" className="block text-sm font-medium text-gray-700">
+                        Prompt Text
+                      </label>
+                      <textarea
+                        id="prompt-text"
+                        rows={6}
+                        value={promptModal.prompt.prompt_text}
+                        onChange={(e) => setPromptModal(prev => ({
+                          ...prev,
+                          prompt: { ...prev.prompt, prompt_text: e.target.value }
+                        }))}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                      />
+                    </div>
+
+                    <div className="flex items-center">
                       <input
                         type="checkbox"
-                        checked={selectedAIFunctions.includes('generator')}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedAIFunctions(prev => [...prev, 'generator']);
-                          } else {
-                            setSelectedAIFunctions(prev => prev.filter(f => f !== 'generator'));
-                          }
-                        }}
-                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        id="prompt-active"
+                        checked={promptModal.prompt.is_active}
+                        onChange={(e) => setPromptModal(prev => ({
+                          ...prev,
+                          prompt: { ...prev.prompt, is_active: e.target.checked }
+                        }))}
+                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                       />
-                      <span className="ml-2 text-sm text-gray-900">Generate Content</span>
-                    </label>
-                  )}
+                      <label htmlFor="prompt-active" className="ml-2 block text-sm text-gray-900">
+                        Active
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 flex justify-end space-x-3">
+                    <button
+                      onClick={handleClosePromptModal}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSavePrompt}
+                      className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                    >
+                      {promptModal.mode === 'add' ? 'Add Prompt' : 'Save Changes'}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
