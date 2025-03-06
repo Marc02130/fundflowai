@@ -16,15 +16,21 @@ Read-only instructions from grant_sections.
 Conditionally Displayed (if ai_generator_prompt exists in grant_sections):
 Editable user_comments_on_ai_output from grant_application_section_fields.
 Read-only ai_output from grant_application_section_fields.
-Checkboxes for AI functions:
-Generate AI text (uses ai_generator_prompt).
-AI editor (uses ai_editor_prompt).
-AI error check (uses ai_error_prompt).
-AI requirement check (uses ai_requirements_prompt).
-AI visualization (uses ai_visualizations_prompt).
+Save & Close button
+Save & Complete Button
 History Panel:
 Show a list of previous versions from grant_application_section_fields, ordered by created_at and formatted as YYYYMMDD HH:MM:SS.
 Clicking a timestamp loads that version's data into the page for review.
+
+Conditionally displayed when grant_sections.ai_generator_prompt is not null or is not empty:
+Review Edits Button
+Prompt AI button
+AI Prompts section (Dropdown, add/edit buttons)
+AI_Output
+
+Conditionally displayed when grant_sections.ai_visualizations_prompt is not null or is not empty:
+Create Visuals button
+
 3. Page Layout
 
 Two-Column Design (default when ai_generator_prompt exists):
@@ -45,7 +51,7 @@ Minimum supported width: 1024px.
 4. User Interactions
 
 Editing:
-Users can modify user_instructions, user_comments_on_ai_output (if displayed), and toggle is_completed.
+Users can modify user_instructions, user_comments_on_ai_output (if displayed), and ai_output.
 No auto-save functionality.
 No character limits on input fields.
 

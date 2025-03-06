@@ -238,12 +238,6 @@ create table public.grant_application_section_fields (
   user_comments_on_ai_output text null,
   ai_output text null,
   ai_model text null,
-  ai_ify boolean null default false,
-  add_visualizations boolean null default false,
-  rewrite boolean null default false,
-  find_and_add_supporting_information boolean null default false,
-  check_errors boolean null default false,
-  check_against_requirements boolean null default false,
   constraint grant_application_section_fields_pkey primary key (id),
   constraint grant_application_section_fie_grant_application_section_id_fkey foreign KEY (grant_application_section_id) references grant_application_section (id)
 ) TABLESPACE pg_default;

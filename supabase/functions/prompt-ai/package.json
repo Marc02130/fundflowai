@@ -1,0 +1,17 @@
+{
+  "name": "prompt-ai",
+  "version": "1.0.0",
+  "description": "Generate and refine text for grant sections",
+  "main": "index.ts",
+  "scripts": {
+    "test": "deno test",
+    "start": "deno run --allow-net --allow-env index.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "deno": "^1.40.0"
+  }
+} 

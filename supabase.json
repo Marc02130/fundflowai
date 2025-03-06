@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "prompt-ai": {
+      "runtime": "python3.9",
+      "entrypoint": "index.py"
+    }
+  }
+} 
