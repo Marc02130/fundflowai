@@ -84,7 +84,7 @@ export default function Dashboard() {
             event: '*',
             schema: 'public',
             table: 'grant_applications',
-            filter: `user_profiles_id=eq.${user.id}`
+            filter: `user_id=eq.${user.id}`
           },
           () => {
             // Refresh the list on any change to user's applications
@@ -107,7 +107,7 @@ export default function Dashboard() {
       const { data, error } = await supabase
         .from('grant_applications')
         .select('id, title')
-        .eq('user_profiles_id', user?.id)
+        .eq('user_id', user?.id)
         .eq('status', 'in-progress')
         .order('updated_at', { ascending: false })
         .limit(5);

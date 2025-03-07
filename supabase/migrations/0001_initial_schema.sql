@@ -20,7 +20,7 @@ create type public.file_type as enum (
   'csv',
   'json',
   'xml',
-  'png'
+  'png',
   'jpg',
   'jpeg',
   'tif',
@@ -127,6 +127,7 @@ create table public.grant_sections (
   optional boolean null default false,
   resubmission boolean null default false,
   ai_generator_prompt text null,
+  ai_visualizations_prompt text null,
   document_package public.document_package_type null default 'Full Proposal'::document_package_type,
   instructions text null,
   constraint grant_sections_pkey primary key (id),
@@ -167,9 +168,10 @@ create table public.grant_opportunities (
 create index IF not exists idx_grant_opportunities_announcement_number on public.grant_opportunities using btree (announcement_number) TABLESPACE pg_default;
 create index IF not exists idx_grant_opportunities_grant_id on public.grant_opportunities using btree (grant_id) TABLESPACE pg_default;
 
--- Create grant_applications tablecreate table public.grant_applications (
+-- Create grant_applications table
+create table public.grant_applications (
   id uuid not null default gen_random_uuid (),
-  user_profiles_id uuid not null,
+  user_id uuid not null,
   title character varying(255) null,
   status character varying(50) not null default 'in-progress'::character varying,
   amount_requested numeric(12, 2) null,
@@ -182,11 +184,10 @@ create index IF not exists idx_grant_opportunities_grant_id on public.grant_oppo
   description text null,
   constraint grant_applications_pkey primary key (id),
   constraint grant_applications_grant_opportunity_id_fkey foreign KEY (grant_opportunity_id) references grant_opportunities (id),
-  constraint grant_applications_user_profiles_id_fkey foreign KEY (user_profiles_id) references user_profiles (id)
+  constraint grant_applications_user_id_fkey foreign KEY (user_id) references auth.users (id)
 ) TABLESPACE pg_default;
 
 create index IF not exists idx_grant_applications_opportunity_id on public.grant_applications using btree (grant_opportunity_id) TABLESPACE pg_default;
-
 
 -- Create grant_application_documents table
 create table public.grant_application_documents (

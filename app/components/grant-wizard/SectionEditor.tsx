@@ -96,6 +96,14 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
     }
   });
 
+  // Separate loading states for each action
+  const [isPrompting, setIsPrompting] = useState(false);
+  const [isReviewing, setIsReviewing] = useState(false);
+  const [isCreatingVisuals, setIsCreatingVisuals] = useState(false);
+
+  // Add state for tracking refinement stages
+  const [refinementStage, setRefinementStage] = useState<'initial' | 'spelling' | 'logic' | 'requirements' | 'complete' | null>(null);
+
   // Load section data, history, and documents
   useEffect(() => {
     async function loadSectionData() {
@@ -316,7 +324,8 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
           grant_application_section_id: sectionId,
           user_instructions: currentField.user_instructions,
           user_comments_on_ai_output: currentField.user_comments_on_ai_output,
-          ai_output: currentField.ai_output
+          ai_output: currentField.ai_output,
+          ai_model: import.meta.env.OPENAI_MODEL
         });
 
       if (saveError) throw saveError;
@@ -451,6 +460,380 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
     } catch (err) {
       console.error('Error saving prompt:', err);
       setError('Failed to save prompt');
+    }
+  };
+
+  const handlePromptAI = async () => {
+    if (!section || !currentField) return;
+    
+    setIsPrompting(true);
+    setRefinementStage('initial');
+    
+    try {
+      // Save current state if AI output exists and has been edited
+      if (currentField.ai_output && currentField.id !== 'new') {
+        const { error: saveError } = await supabase
+          .from('grant_application_section_fields')
+          .insert({
+            grant_application_section_id: sectionId,
+            user_instructions: currentField.user_instructions,
+            user_comments_on_ai_output: currentField.user_comments_on_ai_output,
+            ai_output: currentField.ai_output,
+            ai_model: import.meta.env.OPENAI_MODEL
+          });
+
+        if (saveError) throw saveError;
+      }
+
+      // Create new record for AI generation
+      const { data: newField, error: createError } = await supabase
+        .from('grant_application_section_fields')
+        .insert({
+          grant_application_section_id: sectionId,
+          user_instructions: currentField.user_instructions,
+          user_comments_on_ai_output: currentField.user_comments_on_ai_output,
+          ai_output: null,
+          ai_model: import.meta.env.OPENAI_MODEL
+        })
+        .select()
+        .single();
+
+      if (createError) throw createError;
+      if (!newField) throw new Error('Failed to create new field record');
+
+      // Get the selected prompt text (just for validation)
+      const promptText = selectedPrompt === 'default' 
+        ? section.grant_section.ai_generator_prompt 
+        : userPrompts.find(p => p.id === selectedPrompt)?.prompt_text;
+
+      if (!promptText) {
+        throw new Error('No prompt text available');
+      }
+
+      // Get the user's session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('No active session');
+      }
+
+      // Log request details
+      console.log('=== AI Request Details ===');
+      console.log('URL:', `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/prompt-ai`);
+      console.log('Headers:', {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json'
+      });
+      const requestBody = {
+        section_id: sectionId,
+        field_id: newField.id,
+        prompt_id: selectedPrompt === 'default' ? undefined : selectedPrompt
+      };
+      console.log('Request Body:', JSON.stringify(requestBody, null, 2));
+
+      // Set up realtime subscription to track refinement progress
+      const subscription = supabase
+        .channel('field-updates')
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'grant_application_section_fields',
+            filter: `id=eq.${newField.id}`
+          },
+          (payload) => {
+            console.log('Received field update:', payload);
+            const updatedField = payload.new as typeof newField;
+            // Update current field with new content
+            setCurrentField(updatedField);
+            
+            // Update refinement stage based on ai_model field
+            if (updatedField.ai_model?.includes('initial')) {
+              console.log('Initial stage complete');
+              setRefinementStage('spelling');
+            }
+            else if (updatedField.ai_model?.includes('spelling')) {
+              console.log('Spelling stage complete');
+              setRefinementStage('logic');
+            }
+            else if (updatedField.ai_model?.includes('logic')) {
+              console.log('Logic stage complete');
+              setRefinementStage('requirements');
+            }
+            else if (updatedField.ai_model?.includes('requirements')) {
+              console.log('Requirements stage complete');
+              setRefinementStage('complete');
+              
+              // Refresh history after completion
+              supabase
+                .from('grant_application_section_fields')
+                .select('*')
+                .eq('grant_application_section_id', sectionId)
+                .order('created_at', { ascending: false })
+                .limit(10)
+                .then(({ data, error }) => {
+                  if (!error && data) {
+                    setHistory(data);
+                  }
+                });
+            }
+          }
+        )
+        .subscribe();
+
+      // Clean up subscription on error or completion
+      const cleanup = () => {
+        console.log('Cleaning up subscription');
+        subscription.unsubscribe();
+      };
+
+      try {
+        // Call the edge function with just the IDs
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/prompt-ai`,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody),
+          }
+        );
+
+        // Log response details
+        console.log('=== AI Response Details ===');
+        console.log('Status:', response.status);
+        console.log('Status Text:', response.statusText);
+        console.log('Headers:', Object.fromEntries(response.headers.entries()));
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.log('Error Response:', errorData);
+          cleanup();
+          throw new Error(errorData.error?.message || 'Failed to generate text');
+        }
+
+        // Wait for completion or error
+        const result = await response.json();
+        console.log('Success Response:', result);
+        
+        if (!result.success) {
+          cleanup();
+          throw new Error('Failed to generate text');
+        }
+
+        // Keep subscription active to track refinement stages
+        // It will be cleaned up when refinement is complete
+
+      } catch (err) {
+        console.error('Error generating text:', err);
+        setError(err instanceof Error ? err.message : 'Failed to generate text');
+        setRefinementStage(null);
+        cleanup();
+      } finally {
+        setIsPrompting(false);
+      }
+    } catch (err) {
+      console.error('Error generating text:', err);
+      setError(err instanceof Error ? err.message : 'Failed to generate text');
+      setRefinementStage(null);
+    }
+  };
+
+  // Update the UI to show refinement progress
+  const getRefinementStatus = () => {
+    if (!isPrompting) return 'Generate';
+    switch (refinementStage) {
+      case 'initial': return 'Generating...';
+      case 'spelling': return 'Checking Spelling & Grammar...';
+      case 'logic': return 'Checking Logic...';
+      case 'requirements': return 'Verifying Requirements...';
+      case 'complete': return 'Complete!';
+      default: return 'Generating...';
+    }
+  };
+
+  const handleReviewEdits = async () => {
+    if (!section || !currentField?.ai_output) return;
+    
+    setIsReviewing(true);
+    try {
+      // Get the user's session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('No active session');
+      }
+
+      // Save current edits first
+      const { data: savedField, error: saveError } = await supabase
+        .from('grant_application_section_fields')
+        .insert({
+          grant_application_section_id: sectionId,
+          user_instructions: currentField.user_instructions,
+          user_comments_on_ai_output: currentField.user_comments_on_ai_output,
+          ai_output: currentField.ai_output,
+          ai_model: import.meta.env.OPENAI_MODEL
+        })
+        .select()
+        .single();
+
+      if (saveError) throw saveError;
+      if (!savedField) throw new Error('Failed to save current edits');
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/review-edits`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            section_id: sectionId,
+            field_id: savedField.id
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error?.message || 'Failed to review text');
+      }
+
+      const result = await response.json();
+      
+      if (result.data?.ai_output) {
+        // Get the latest field data including the reviewed text
+        const { data: latestField, error: fetchError } = await supabase
+          .from('grant_application_section_fields')
+          .select('*')
+          .eq('id', result.data.field_id)
+          .single();
+
+        if (fetchError) throw fetchError;
+        if (!latestField) throw new Error('Failed to fetch reviewed text');
+
+        // Update the current field with all the latest data
+        setCurrentField(latestField);
+
+        // Refresh history
+        const { data: newHistory, error: historyError } = await supabase
+          .from('grant_application_section_fields')
+          .select('*')
+          .eq('grant_application_section_id', sectionId)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (historyError) throw historyError;
+        setHistory(newHistory || []);
+      } else {
+        throw new Error('No reviewed text received');
+      }
+    } catch (err) {
+      console.error('Error reviewing text:', err);
+      setError(err instanceof Error ? err.message : 'Failed to review text');
+    } finally {
+      setIsReviewing(false);
+    }
+  };
+
+  const handleCreateVisuals = async () => {
+    if (!section || !currentField?.user_instructions) return;
+    
+    setIsCreatingVisuals(true);
+    try {
+      // First save the current field to history
+      const { data: savedField, error: saveError } = await supabase
+        .from('grant_application_section_fields')
+        .insert({
+          grant_application_section_id: sectionId,
+          user_instructions: currentField.user_instructions,
+          ai_model: 'create-visuals'
+        })
+        .select()
+        .single();
+
+      if (saveError) throw saveError;
+      if (!savedField) throw new Error('Failed to save field record');
+
+      // Find image filename in user instructions
+      const imageMatch = currentField.user_instructions.match(/([a-zA-Z0-9-]+\.(?:png|jpg|jpeg|gif))/i);
+      if (!imageMatch) {
+        throw new Error('No image filename found in instructions');
+      }
+      const imageFilename = imageMatch[1];
+
+      // Find the referenced document
+      const { data: docData, error: docError } = await supabase
+        .from('grant_application_section_documents')
+        .select('*')
+        .eq('grant_application_section_id', sectionId)
+        .eq('file_name', imageFilename)
+        .single();
+
+      if (docError) throw docError;
+      if (!docData) {
+        throw new Error(`Image "${imageFilename}" not found in attachments`);
+      }
+
+      // Get the user's session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('No active session');
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-visuals`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            section_id: sectionId,
+            field_id: savedField.id,
+            image_path: docData.file_path
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error?.message || 'Failed to create visual');
+      }
+
+      const result = await response.json();
+      
+      if (result.success) {
+        // Refresh documents list to show new visual
+        const { data: documentData, error: fetchError } = await supabase
+          .from('grant_application_section_documents')
+          .select('*')
+          .eq('grant_application_section_id', sectionId);
+
+        if (fetchError) throw fetchError;
+        setDocuments(documentData || []);
+
+        // Refresh history
+        const { data: newHistory, error: historyError } = await supabase
+          .from('grant_application_section_fields')
+          .select('*')
+          .eq('grant_application_section_id', sectionId)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (historyError) throw historyError;
+        setHistory(newHistory || []);
+      } else {
+        throw new Error('Failed to create visual');
+      }
+    } catch (err) {
+      console.error('Error creating visual:', err);
+      setError(err instanceof Error ? err.message : 'Failed to create visual');
+    } finally {
+      setIsCreatingVisuals(false);
     }
   };
 
@@ -637,17 +1020,21 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
               {section.grant_section.ai_visualizations_prompt && (
                 <button
                   type="button"
-                  className="px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
+                  onClick={handleCreateVisuals}
+                  disabled={isCreatingVisuals || !currentField?.user_instructions || documents.length === 0}
+                  className="px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Create Visuals
+                  {isCreatingVisuals ? 'Creating...' : 'Create Visuals'}
                 </button>
               )}
               {section.grant_section.ai_generator_prompt && (
                 <button
                   type="button"
-                  className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                  className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50"
+                  onClick={handlePromptAI}
+                  disabled={isPrompting}
                 >
-                  Prompt AI
+                  {getRefinementStatus()}
                 </button>
               )}
               <button
@@ -725,8 +1112,10 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
               <button
                 title="Send manual edits to AI for review and error correction"
                 className="px-3 py-1 text-sm font-medium text-black bg-yellow-200 hover:bg-yellow-300 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
+                onClick={handleReviewEdits}
+                disabled={isReviewing || !currentField?.ai_output}
               >
-                Review Edits
+                {isReviewing ? 'Reviewing...' : 'Review Edits'}
               </button>
             </div>
             <RichTextEditor

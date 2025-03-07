@@ -1,5 +1,5 @@
-import { EdgeFunctionError, ERROR_CODES } from './errors';
-import { supabase as defaultSupabase } from './db';
+import { EdgeFunctionError, ERROR_CODES } from './errors.ts';
+import { supabase as defaultSupabase } from './db.ts';
 
 export interface AuthError extends Error {
   code: string;

@@ -17,20 +17,6 @@ export class EdgeFunctionError extends Error {
     super(message);
     this.name = 'EdgeFunctionError';
   }
-
-  toResponse(): Response {
-    return new Response(JSON.stringify({
-      success: false,
-      error: {
-        code: this.code,
-        message: this.message,
-        details: this.details
-      }
-    }), {
-      status: this.statusCode,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
 }
 
 export const ERROR_CODES = {
@@ -43,9 +29,24 @@ export const ERROR_CODES = {
   API_ERROR: 'api/error'
 } as const;
 
-export function handleError(error: unknown): Response {
+export function handleError(error: unknown, options?: { headers?: Record<string, string> }): Response {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(options?.headers || {})
+  };
+
   if (error instanceof EdgeFunctionError) {
-    return error.toResponse();
+    return new Response(JSON.stringify({
+      success: false,
+      error: {
+        code: error.code,
+        message: error.message,
+        details: error.details
+      }
+    }), {
+      status: error.statusCode,
+      headers
+    });
   }
   
   return new Response(JSON.stringify({
@@ -57,6 +58,6 @@ export function handleError(error: unknown): Response {
     }
   }), {
     status: 400,
-    headers: { 'Content-Type': 'application/json' }
+    headers
   });
 } 

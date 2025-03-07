@@ -1,0 +1,8 @@
+{
+  "imports": {
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.3",
+    "errors": "./shared/errors.ts",
+    "auth": "./shared/auth.ts",
+    "openai": "./shared/openai.ts"
+  }
+} 

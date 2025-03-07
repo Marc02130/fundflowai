@@ -1,36 +1,112 @@
 import { createClient } from '@supabase/supabase-js';
-import { handleError, EdgeFunctionError, ERROR_CODES } from '../shared/errors';
-import { generateText, refineText } from '../shared/openai';
-import { validateUserSession, validateUserAccess } from '../shared/auth';
+import { handleError, EdgeFunctionError, ERROR_CODES } from '../shared/errors.ts';
+import { validateUserSession, validateUserAccess } from '../shared/auth.ts';
+import { generateText, refineText } from '../shared/openai.ts';
 
 // Create Supabase client
-// @ts-ignore
-const supabase = globalThis.supabase || (() => {
-  const supabaseUrl = Deno.env.get('SUPABASE_URL');
-  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
-  return createClient(supabaseUrl, supabaseAnonKey);
-})();
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL') ?? '',
+  Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+);
 
-// Get section data
-async function getSectionData(sectionId: string) {
-  const { data, error } = await supabase
-    .from('grant_application_sections')
-    .select('id, grant_application_id, grant_section_id, ai_generator_prompt, name as section_name, is_completed')
-    .eq('id', sectionId)
-    .single();
+// Define CORS headers
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Max-Age': '86400',
+};
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      throw new EdgeFunctionError(ERROR_CODES.NOT_FOUND, 'Section not found');
+// Custom error response function
+function errorResponse(error: Error, status: number = 400) {
+  return new Response(
+    JSON.stringify({
+      error: {
+        message: error.message,
+        ...(error instanceof EdgeFunctionError && { code: error.code, details: error.details })
+      }
+    }),
+    {
+      status,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
     }
-    throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get section data: ${error.message}`);
-  }
+  );
+}
 
-  if (!data) {
-    throw new EdgeFunctionError(ERROR_CODES.NOT_FOUND, 'Section not found');
-  }
+// Get section data step by fucking step
+async function getSectionData(sectionId: string) {
+  console.log('=== Getting Section Data ===');
+  console.log('Section ID:', sectionId);
+  
+  try {
+    // 1. Get the fucking base section
+    const { data: sectionData, error: sectionError } = await supabase
+      .from('grant_application_section')
+      .select('*')
+      .eq('id', sectionId)
+      .single();
 
-  return data;
+    if (sectionError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get section: ${sectionError.message}`);
+    if (!sectionData) throw new EdgeFunctionError(ERROR_CODES.NOT_FOUND, 'Section not found');
+    
+    // 2. Get the fucking grant section
+    const { data: grantSection, error: grantSectionError } = await supabase
+      .from('grant_sections')
+      .select('*')
+      .eq('id', sectionData.grant_section_id)
+      .single();
+      
+    if (grantSectionError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get grant section: ${grantSectionError.message}`);
+    
+    // 3. Get the fucking application
+    const { data: application, error: applicationError } = await supabase
+      .from('grant_applications')
+      .select('*')
+      .eq('id', sectionData.grant_application_id)
+      .single();
+      
+    if (applicationError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get application: ${applicationError.message}`);
+    
+    // 4. Get the fucking grant opportunity
+    const { data: opportunity, error: opportunityError } = await supabase
+      .from('grant_opportunities')
+      .select('*')
+      .eq('id', application.grant_opportunity_id)
+      .single();
+      
+    if (opportunityError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get opportunity: ${opportunityError.message}`);
+    
+    // 5. Get the fucking requirements
+    const { data: requirements, error: requirementsError } = await supabase
+      .from('grant_requirements')
+      .select('*')
+      .eq('grant_id', opportunity.grant_id);
+      
+    if (requirementsError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get requirements: ${requirementsError.message}`);
+
+    // Put this shit together
+    const result = {
+      ...sectionData,
+      grant_section: grantSection,
+      grant_application: {
+        ...application,
+        grant_opportunity: {
+          ...opportunity,
+          requirements: requirements
+        }
+      }
+    };
+
+    console.log('Final Data:', result);
+    return result;
+
+  } catch (err) {
+    console.error('Error in getSectionData:', err);
+    throw err;
+  }
 }
 
 // Get user prompt
@@ -58,183 +134,231 @@ async function getUserPrompt(promptId: string) {
 
 // Get section attachments
 async function getSectionAttachments(sectionId: string) {
+  console.log("=== Getting Section Attachments ===");
+  const { data: attachments, error: attachmentsError } = await supabase
+    .from('grant_application_section_documents')
+    .select('*')
+    .eq('grant_application_section_id', sectionId);
+
+  if (attachmentsError) {
+    console.error("Error getting attachments:", attachmentsError);
+    throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get section attachments: ${attachmentsError.message}`);
+  }
+
+  console.log("Section attachments:", attachments);
+  return attachments;
+}
+
+// Get field data
+async function getFieldData(fieldId: string) {
   const { data, error } = await supabase
-    .rpc('get_section_attachments', { section_id: sectionId });
+    .from('grant_application_section_fields')
+    .select('*')
+    .eq('id', fieldId)
+    .single();
 
   if (error) {
-    throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get section attachments: ${error.message}`);
+    throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get field data: ${error.message}`);
+  }
+
+  if (!data) {
+    throw new EdgeFunctionError(ERROR_CODES.NOT_FOUND, 'Field not found');
   }
 
   return data;
 }
 
-// Get section context
-async function getSectionContext(sectionId: string) {
-  const { data, error } = await supabase
+// Update field with new content and stage
+async function updateField(fieldId: string, aiOutput: string, stage: string) {
+  const { error } = await supabase
     .from('grant_application_section_fields')
-    .select('user_instructions, user_comments_on_ai_output, ai_output')
-    .eq('grant_application_section_id', sectionId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
-
-  if (error && error.code !== 'PGRST116') {
-    throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get section context: ${error.message}`);
-  }
-
-  return data || null;
-}
-
-// Save section field
-async function saveSectionField(sectionId: string, aiOutput: string) {
-  const { data, error } = await supabase
-    .from('grant_application_section_fields')
-    .insert({
-      grant_application_section_id: sectionId,
+    .update({
       ai_output: aiOutput,
-      ai_model: 'gpt-4'
+      ai_model: `${Deno.env.get('OPENAI_MODEL')}-${stage}`,
+      updated_at: new Date().toISOString()
     })
-    .select('id')
-    .single();
+    .eq('id', fieldId);
 
   if (error) {
-    throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to save section field: ${error.message}`);
+    throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to update field: ${error.message}`);
   }
-
-  return data;
 }
 
 // Main handler
-export async function handler(request: Request) {
+Deno.serve(async (req) => {
+  // Handle CORS preflight request
+  if (req.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: corsHeaders
+    });
+  }
+
   try {
     console.log("=== Starting handler execution ===");
     
-    // Validate request
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader) {
-      console.log("Missing authorization header");
-      throw new EdgeFunctionError(ERROR_CODES.AUTH_ERROR, 'Missing authorization header');
+    // Validate request method
+    if (req.method !== 'POST') {
+      throw new EdgeFunctionError(ERROR_CODES.INVALID_INPUT, 'Only POST method is allowed', undefined, 405);
     }
 
-    const body = await request.json();
-    const { section_id, prompt_id } = body;
-    console.log("Request body:", { section_id, prompt_id });
+    // Get authorization header
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      throw new EdgeFunctionError(ERROR_CODES.AUTH_ERROR, 'Missing authorization header', undefined, 401);
+    }
 
-    if (!section_id) {
-      console.log("Missing section_id");
-      throw new EdgeFunctionError(ERROR_CODES.INVALID_INPUT, 'section_id is required');
+    // Parse request body
+    let body;
+    try {
+      body = await req.json();
+    } catch (e) {
+      throw new EdgeFunctionError(ERROR_CODES.INVALID_INPUT, 'Invalid JSON in request body');
+    }
+
+    const { section_id, field_id, prompt_id } = body;
+    console.log("Request body:", { section_id, field_id, prompt_id });
+
+    if (!section_id || !field_id) {
+      throw new EdgeFunctionError(ERROR_CODES.INVALID_INPUT, 'section_id and field_id are required');
     }
 
     // Validate user session
-    console.log("Validating user session...");
+    console.log("=== User Validation ===");
+    console.log("Auth Header:", authHeader);
     const userId = await validateUserSession(authHeader);
-    console.log("User session validated, userId:", userId);
+    console.log("User ID from session:", userId);
 
-    // Get section data
-    console.log("Getting section data...");
-    const section = await getSectionData(section_id);
-    console.log("Section data retrieved:", section);
+    // Get section and field data
+    console.log("=== Getting Data ===");
+    console.log("Getting section and field data...");
+    const [section, field] = await Promise.all([
+      getSectionData(section_id),
+      getFieldData(field_id)
+    ]);
+    console.log("Section data:", section);
+    console.log("Field data:", field);
 
     // Validate user access
-    console.log("Validating user access...");
-    const hasAccess = await validateUserAccess(userId, section.grant_application_id);
-    console.log("User access validation result:", hasAccess);
-    if (!hasAccess) {
-      console.log("User does not have access");
-      throw new EdgeFunctionError(ERROR_CODES.AUTH_ERROR, 'User does not have access to this application');
+    console.log("=== Access Check ===");
+    console.log("Raw auth header:", authHeader);
+    console.log("User ID from JWT:", userId);
+    console.log("Section data:", JSON.stringify(section, null, 2));
+    console.log("Application ID:", section.grant_application.id);
+    
+    try {
+      // Check access directly in the database using user_id (links to auth.users)
+      const { data: accessData, error: accessError } = await supabase
+        .from('grant_applications')
+        .select('id')
+        .eq('id', section.grant_application.id)
+        .eq('user_id', userId)  // This is correct - links to auth.users
+        .single();
+
+      if (accessError) {
+        console.error("Database error during access check:", accessError);
+        throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to check access: ${accessError.message}`);
+      }
+
+      const hasAccess = !!accessData;
+      console.log("Direct DB access check result:", hasAccess);
+      
+      if (!hasAccess) {
+        console.error("Access denied for user", userId, "to application", section.grant_application.id);
+        throw new EdgeFunctionError(ERROR_CODES.AUTH_ERROR, 'User does not have access to this application');
+      }
+      console.log("Access check passed");
+    } catch (err) {
+      console.error("Error during access check:", err);
+      throw new EdgeFunctionError(ERROR_CODES.AUTH_ERROR, 'Failed to validate user access');
     }
 
-    // Get prompt
+    // Get prompt text
     console.log("Getting prompt...");
-    let prompt = section.ai_generator_prompt;
+    let promptText = section.grant_section?.ai_generator_prompt;
     if (prompt_id) {
-      console.log("Using custom prompt with ID:", prompt_id);
       const userPrompt = await getUserPrompt(prompt_id);
-      prompt = userPrompt.prompt_text;
+      promptText = userPrompt.prompt_text;
     }
-    console.log("Final prompt:", prompt);
 
     // Get attachments and context
     console.log("Getting attachments and context...");
-    const [attachments, context] = await Promise.all([
-      getSectionAttachments(section_id),
-      getSectionContext(section_id)
-    ]);
-    console.log("Attachments:", attachments);
-    console.log("Context:", context);
+    const attachments = await getSectionAttachments(section_id);
 
-    // Construct AI request
-    console.log("Constructing AI request...");
+    // Stage 1: Initial Generation
+    console.log("Stage 1: Initial Generation...");
     const aiRequest = {
-      prompt,
+      prompt: promptText,
       attachments: attachments.map(a => ({
         name: a.file_name,
         type: a.file_type,
         path: a.file_path
       })),
-      context: context ? {
-        instructions: context.user_instructions,
-        comments: context.user_comments_on_ai_output,
-        previousOutput: context.ai_output
-      } : null
+      context: {
+        instructions: field.user_instructions,
+        comments: field.user_comments_on_ai_output
+      }
     };
-    console.log("AI request constructed:", aiRequest);
+    
+    // Format the prompt properly
+    const formattedPrompt = `
+Instructions: ${aiRequest.context.instructions || 'No specific instructions provided'}
 
-    // Generate text
-    console.log("Generating text...");
-    const generatedText = await generateText(
-      JSON.stringify(aiRequest),
+Previous Comments: ${aiRequest.context.comments || 'No previous comments'}
+
+Attachments:
+${aiRequest.attachments.map(a => `- ${a.name} (${a.type}): ${a.path}`).join('\n')}
+
+Prompt:
+${aiRequest.prompt}
+`;
+    
+    let generatedText = await generateText(
+      formattedPrompt,
       'gpt-4',
       2000,
       0.7
     );
-    console.log("Text generated:", generatedText);
+    await updateField(field_id, generatedText, 'initial');
+    
+    // Stage 2: Spelling and Grammar Check
+    console.log("Stage 2: Spelling and Grammar Check...");
+    const spellingPrompt = `Act as a proofreading expert tasked with correcting grammatical, spelling and punctuation errors in the given text. Identify any mistakes, and make necessary corrections to ensure clarity, accuracy, enhance readability and flow. Text: ${generatedText}`;
+    generatedText = await refineText(generatedText, 'spelling', spellingPrompt);
+    await updateField(field_id, generatedText, 'spelling');
+    
+    // Stage 3: Logic Check
+    console.log("Stage 3: Logic Check...");
+    const logicPrompt = `Review the following text for logical errors, contradictions, and inconsistencies. Identify any issues and provide corrected versions while maintaining the original meaning and intent of the text: ${generatedText}`;
+    generatedText = await refineText(generatedText, 'logic', logicPrompt);
+    await updateField(field_id, generatedText, 'logic');
+    
+    // Stage 4: Requirements Check
+    console.log("Stage 4: Requirements Check...");
+    const requirementsPrompt = `Review the following text for compliance with grant requirements:
 
-    // Refine text through multiple stages as per requirements
-    console.log("Refining text...");
-    let refinedText = generatedText;
-    
-    // First check spelling and grammar per requirements
-    console.log("Checking spelling and grammar...");
-    const spellingPrompt = `Act as a proofreading expert tasked with correcting grammatical, spelling and punctuation errors in the given text. Identify any mistakes, and make necessary corrections to ensure clarity, accuracy, enhance readability and flow. Text: ${refinedText}`;
-    refinedText = await refineText(refinedText, 'spelling', spellingPrompt);
-    console.log("Spelling and grammar checked:", refinedText);
-    
-    // Then check logic and consistency per requirements
-    console.log("Checking logic and consistency...");
-    const logicPrompt = `Review the following text for logical errors, contradictions, and inconsistencies. Identify any issues and provide corrected versions while maintaining the original meaning and intent of the text: ${refinedText}`;
-    refinedText = await refineText(refinedText, 'logic', logicPrompt);
-    console.log("Logic and consistency checked:", refinedText);
-    
-    // Finally ensure compliance with grant requirements per requirements
-    console.log("Checking compliance with requirements...");
-    const requirementsPrompt = `Review the following text for compliance with the requirements specified in the provided links. Identify any non-compliant areas, explain the issues, and suggest corrections to ensure full compliance while maintaining the original intent of the text: '${refinedText}'. Please refer to the following links for compliance requirements: ${section.grant_requirements || ''}`;
-    refinedText = await refineText(refinedText, 'requirements', requirementsPrompt);
-    console.log("Requirements compliance checked:", refinedText);
+Content to Review:
+${generatedText}
 
-    // Save result
-    console.log("Saving result...");
-    const field = await saveSectionField(section_id, refinedText);
-    console.log("Result saved, field:", field);
+Requirements to Check Against:
+${section.grant_application?.grant_opportunity?.requirements?.map(req => `- ${req.requirement_text}`).join('\n') || 'No specific requirements provided'}`;
+    
+    generatedText = await refineText(generatedText, 'requirements', requirementsPrompt);
+    await updateField(field_id, generatedText, 'requirements');
 
     console.log("=== Handler execution completed successfully ===");
     return new Response(JSON.stringify({
-      field_id: field.id,
-      ai_output: refinedText
+      success: true,
+      field_id: field_id
     }), {
-      headers: { 'Content-Type': 'application/json' },
-      status: 200
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
     });
 
   } catch (error) {
-    console.log("=== Error caught in handler ===");
-    console.log("Error type:", error.constructor.name);
-    console.log("Error message:", error.message);
-    if (error instanceof EdgeFunctionError) {
-      console.log("Error code:", error.code);
-      console.log("Error details:", error.details);
-    }
-    console.log("=== End error details ===");
-    return handleError(error);
+    console.error('Error in handler:', error);
+    return handleError(error, { headers: corsHeaders });
   }
-} 
+}); 

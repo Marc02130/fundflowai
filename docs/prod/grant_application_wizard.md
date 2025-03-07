@@ -36,7 +36,7 @@ The grant application creation process is a multi-step wizard that guides users 
 ## Application Creation
 Upon wizard completion:
 1. Creates grant_application record with:
-   - user_profiles_id
+   - user_id
    - title
    - description
    - status ('in-progress')

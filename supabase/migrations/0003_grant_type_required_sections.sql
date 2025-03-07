@@ -28,7 +28,7 @@ WITH CHECK (
   SPLIT_PART(name, '/', 1) IN (
     SELECT id::text 
     FROM grant_applications 
-    WHERE user_profiles_id = auth.uid()
+    WHERE user_id = auth.uid()
   )
 );
 
@@ -39,7 +39,7 @@ USING (
   SPLIT_PART(name, '/', 1) IN (
     SELECT id::text 
     FROM grant_applications 
-    WHERE user_profiles_id = auth.uid()
+    WHERE user_id = auth.uid()
   )
 );
 
@@ -50,6 +50,6 @@ USING (
   SPLIT_PART(name, '/', 1) IN (
     SELECT id::text 
     FROM grant_applications 
-    WHERE user_profiles_id = auth.uid()
+    WHERE user_id = auth.uid()
   )
 );

@@ -35,7 +35,7 @@ export default function NewGrantApplication() {
       const { data: application, error: applicationError } = await supabase
         .from('grant_applications')
         .insert({
-          user_profiles_id: user.id,
+          user_id: user.id,
           title: data.title,
           description: data.description,
           status: 'in-progress',

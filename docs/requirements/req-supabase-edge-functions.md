@@ -87,6 +87,8 @@ Key Components:
 Environment Variables:
 - OPENAI_MODEL: Model for text generation
 - OPENAI_IMAGE_MODEL: Model for image generation
+- SUPABASE_URL: Supabase project URL
+- SUPABASE_ANON_KEY: Supabase anonymous key
 
 Standardized Response Format:
 Success Response:
@@ -172,44 +174,126 @@ HTTP Method: POST
 Inputs (Request Body):
 ```typescript
 interface PromptAIRequest {
-  grant_application_section_id: string;
-  prompt_id?: string;
+  section_id: string;    // ID of the grant application section
+  field_id: string;      // ID of the field to update
+  prompt_id?: string;    // Optional custom prompt ID
 }
 ```
 
 Processing Steps:
-Data Retrieval:
-- Fetch the section record from grant_application_section using grant_application_section_id.
-- Retrieve the prompt:
-  - If prompt_id is provided, query user_ai_prompts for prompt_text.
-  - Otherwise, query grant_sections for ai_generator_prompt.
-- Fetch attachments:
-  - Check grant_application_section_documents first (section-specific).
-  - Fall back to grant_application_documents (application-wide).
-- Fetch context from grant_application_section_fields:
-  - Latest user_instructions.
-  - Latest user_comments_on_ai_output.
-  - Most recent ai_output (if any).
+1. Request Validation:
+   - Validate HTTP method (POST only)
+   - Check authorization header presence
+   - Parse and validate request body
+   - Verify required fields (section_id, field_id)
 
-Text Generation:
-- Construct an AI request combining the prompt, attachments (as text or metadata), and context.
-- Call OpenAI API to generate initial text.
-- Perform spelling/grammar check using OpenAI.
-- Perform logic check using OpenAI.
-- Perform requirements check using OpenAI.
+2. User Authentication:
+   - Extract JWT from authorization header
+   - Validate user session
+   - Get user ID from session
 
-Output:
-- Insert a new record into grant_application_section_fields:
-  - grant_application_section_id: From input.
-  - ai_output: Final refined text.
-  - ai_model: Value of OPENAI_MODEL environment variable.
-  - created_at/updated_at: Current timestamp.
-- Return JSON: { success: true, data: { field_id: string, ai_output: string } }.
+3. Data Retrieval:
+   a. Section Data:
+      - Get base section from grant_application_section
+      - Get grant section from grant_sections
+      - Get application from grant_applications
+      - Get opportunity from grant_opportunities
+      - Get requirements from grant_requirements
+      - Combine into unified section object
+   
+   b. Field Data:
+      - Get field data from grant_application_section_fields
+      - Extract user instructions and comments
+   
+   c. Attachments:
+      - Get from grant_application_section_documents
+      - Map to simplified format (name, type, path)
+   
+   d. Prompt:
+      - If prompt_id provided, get from user_ai_prompts
+      - Otherwise, use grant_section.ai_generator_prompt
 
-Error Handling:
-- If no prompt is found, return { success: false, error: "No generator prompt available" }.
-- If API calls fail, retry once and log the attempt before returning an error.
-- Use standardized error response format.
+4. Access Validation:
+   - Query grant_applications for user access
+   - Check user_id matches application owner
+   - Return 401 if access denied
+
+5. Text Generation and Refinement:
+   a. Initial Generation:
+      - Format prompt with:
+        * Instructions from field
+        * Previous comments
+        * Attachment list
+        * Main prompt text
+      - Generate using OpenAI GPT-4
+      - Update field with initial text
+   
+   b. Spelling/Grammar Check:
+      - Use proofreading expert prompt
+      - Apply corrections
+      - Update field with revised text
+   
+   c. Logic Check:
+      - Check for contradictions/inconsistencies
+      - Apply corrections
+      - Update field with logical text
+   
+   d. Requirements Check:
+      - Format requirements as bullet points
+      - Verify compliance
+      - Apply corrections
+      - Update field with compliant text
+
+6. Database Updates:
+   - Update grant_application_section_fields after each stage:
+     * ai_output: Generated/refined text
+     * ai_model: gpt-4-[stage]
+     * updated_at: Current timestamp
+
+7. Error Handling:
+   - Use standardized EdgeFunctionError class
+   - Include error code and details
+   - Log error information
+   - Return appropriate HTTP status
+
+8. Response Format:
+Success:
+```typescript
+{
+  success: true,
+  field_id: string;
+}
+```
+
+Error:
+```typescript
+{
+  success: false,
+  error: {
+    code: string;      // Standardized error code
+    message: string;   // Human-readable message
+    details?: object;  // Additional context
+  }
+}
+```
+
+9. CORS Configuration:
+```typescript
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Max-Age': '86400',
+};
+```
+
+10. Logging Requirements:
+    - Log function execution start/end
+    - Log user validation steps
+    - Log data retrieval progress
+    - Log each generation stage
+    - Log error details with stack traces
+    - Use console.log for development visibility
 
 Edge Function B: "Review Edits" (Check Manually Edited Text)
 
@@ -266,12 +350,16 @@ interface CreateVisualsRequest {
 Processing Steps:
 Data Retrieval:
 - Verify the image_path exists in either grant_application_section_documents or grant_application_documents.
+- Validate input file format (supported: png, jpg, jpeg, tif, tiff, svg).
+- Validate file size (max 10MB).
 - Include context if provided.
 
 Visual Generation:
 - Use OpenAI image generation model (OPENAI_IMAGE_MODEL).
-- Scale output to fit page size (7.5x10 inches) while maintaining aspect ratio.
+- Maximum output to fit page size (7.5x10 inches) while maintaining aspect ratio.
+- Follow grant writers specifications for image size.
 - Convert output to PNG format.
+- Validate output dimensions before saving.
 
 Storage:
 - Save the generated image as a new file in grant_application_section_documents.
@@ -286,7 +374,10 @@ Output:
 
 Error Handling:
 - If image_path is invalid, return { success: false, error: "Image not found" }.
+- If file format is unsupported, return { success: false, error: "Unsupported file format" }.
+- If file size exceeds limit, return { success: false, error: "File size exceeds limit" }.
 - If generation fails, return { success: false, error: "Visual creation failed" }.
+- If output dimensions invalid, return { success: false, error: "Invalid output dimensions" }.
 - Use standardized error response format.
 
 Additional Considerations
