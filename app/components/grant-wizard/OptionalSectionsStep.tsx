@@ -77,17 +77,21 @@ export default function OptionalSectionsStep({ onNext, onSave, initialData }: Op
 
   const handleNext = () => {
     return new Promise<void>((resolve) => {
+      console.log('OptionalSectionsStep - handleNext - selectedSections:', selectedSections);
       onNext({ selectedSections });
       resolve();
     });
   };
 
   const toggleSection = (sectionId: string) => {
-    setSelectedSections(prev =>
-      prev.includes(sectionId)
+    console.log('OptionalSectionsStep - toggleSection - before:', { sectionId, currentSelected: selectedSections });
+    setSelectedSections(prev => {
+      const newSelections = prev.includes(sectionId)
         ? prev.filter(id => id !== sectionId)
-        : [...prev, sectionId]
-    );
+        : [...prev, sectionId];
+      console.log('OptionalSectionsStep - toggleSection - after:', newSelections);
+      return newSelections;
+    });
   };
 
   // Expose state values for the parent component

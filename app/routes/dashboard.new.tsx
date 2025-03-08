@@ -25,42 +25,83 @@ export default function NewGrantApplication() {
   const [error, setError] = useState<string | null>(null);
 
   const handleComplete = useCallback(async (data: WizardData) => {
+    let sectionsToCreate;
     try {
+      // Combine the final step data with accumulated wizardData
+      const finalData = {
+        ...wizardData,
+        ...data
+      };
+
       // Get the current user
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       if (userError) throw userError;
       if (!user) throw new Error('No user found');
 
       // Create the grant application
+      console.log('Creating grant application with data:', {
+        user_id: user.id,
+        title: finalData.title,
+        description: finalData.description,
+        status: 'in-progress',
+        grant_type_id: finalData.grantTypeId,
+        resubmission: finalData.resubmission,
+        grant_opportunity_id: finalData.opportunityId,
+        amount_requested: finalData.amount_requested
+      });
+
       const { data: application, error: applicationError } = await supabase
         .from('grant_applications')
         .insert({
           user_id: user.id,
-          title: data.title,
-          description: data.description,
+          title: finalData.title,
+          description: finalData.description,
           status: 'in-progress',
-          grant_type_id: data.grantTypeId,
-          resubmission: data.resubmission,
-          grant_opportunity_id: data.opportunityId,
-          amount_requested: data.amount_requested
+          grant_type_id: finalData.grantTypeId,
+          resubmission: finalData.resubmission,
+          grant_opportunity_id: finalData.opportunityId,
+          amount_requested: finalData.amount_requested
         })
         .select()
         .single();
 
-      if (applicationError) throw applicationError;
+      if (applicationError) {
+        console.error('Grant application creation error:', {
+          error: applicationError,
+          details: applicationError.details,
+          hint: applicationError.hint,
+          message: applicationError.message
+        });
+        throw applicationError;
+      }
 
       // Fetch all sections (both required and optional) for the grant
       const { data: allSections, error: sectionsError } = await supabase
         .from('grant_sections')
         .select('id, flow_order, optional')
-        .eq('grant_id', data.grantId)
+        .eq('grant_id', finalData.grantId)
         .order('flow_order');
 
       if (sectionsError) throw sectionsError;
 
-      // Filter sections to include all required sections and selected optional sections
-      const sectionsToCreate = allSections
-        .filter(section => !section.optional || (data.selectedSections || []).includes(section.id))
+      // Create sections array: all required sections plus selected optional sections
+      console.log('Creating sections - data:', {
+        allSections,
+        selectedSections: finalData.selectedSections,
+        wizardData: finalData
+      });
+
+      sectionsToCreate = allSections
+        .filter(section => {
+          const shouldInclude = !section.optional || (finalData.selectedSections && finalData.selectedSections.includes(section.id));
+          console.log('Section filter:', {
+            id: section.id,
+            optional: section.optional,
+            selected: finalData.selectedSections?.includes(section.id),
+            included: shouldInclude
+          });
+          return shouldInclude;
+        })
         .map(section => ({
           grant_application_id: application.id,
           grant_section_id: section.id,
@@ -69,19 +110,38 @@ export default function NewGrantApplication() {
         }));
 
       // Create grant application sections
+      console.log('About to create sections:', {
+        sectionsToCreate,
+        selectedSections: finalData.selectedSections,
+        grantId: finalData.grantId
+      });
+
       const { error: createSectionsError } = await supabase
         .from('grant_application_section')
         .insert(sectionsToCreate);
 
-      if (createSectionsError) throw createSectionsError;
+      if (createSectionsError) {
+        console.error('Error creating sections:', {
+          error: createSectionsError,
+          details: createSectionsError.details,
+          hint: createSectionsError.hint,
+          message: createSectionsError.message
+        });
+        throw createSectionsError;
+      }
 
       // Navigate to the application view
       navigate(`/dashboard/applications/${application.id}`);
     } catch (err) {
-      console.error('Error creating application:', err);
+      console.error('Error creating application:', {
+        error: err,
+        message: err instanceof Error ? err.message : 'Unknown error',
+        data: finalData,
+        sections: sectionsToCreate
+      });
       setError('Failed to create application');
     }
-  }, [navigate]);
+  }, [navigate, wizardData]);
 
   const handleOrganizationOpportunityNext = useCallback(async (data: {
     organizationId: string;
@@ -173,6 +233,16 @@ export default function NewGrantApplication() {
           ...prev,
           selectedSections: data.selectedSections
         };
+        // Save to localStorage immediately
+        const savedState = localStorage.getItem(WIZARD_STATE_KEY);
+        const savedData = savedState ? JSON.parse(savedState) : {};
+        localStorage.setItem(WIZARD_STATE_KEY, JSON.stringify({
+          ...savedData,
+          data: {
+            ...savedData.data,
+            ...newData
+          }
+        }));
         resolve();
         return newData;
       });
