@@ -27,10 +27,14 @@ export default function NewGrantApplication() {
   const handleComplete = useCallback(async (data: WizardData) => {
     let sectionsToCreate;
     try {
+      // Get the selected sections from either the final step or accumulated wizard data
+      const selectedSections = data.selectedSections || wizardData.selectedSections;
+
       // Combine the final step data with accumulated wizardData
-      const finalData = {
+      const finalData: WizardData = {
         ...wizardData,
-        ...data
+        ...data,
+        selectedSections // Explicitly set selectedSections after spreading
       };
 
       // Get the current user
@@ -87,17 +91,17 @@ export default function NewGrantApplication() {
       // Create sections array: all required sections plus selected optional sections
       console.log('Creating sections - data:', {
         allSections,
-        selectedSections: finalData.selectedSections,
+        selectedSections: selectedSections,
         wizardData: finalData
       });
 
       sectionsToCreate = allSections
         .filter(section => {
-          const shouldInclude = !section.optional || (finalData.selectedSections && finalData.selectedSections.includes(section.id));
+          const shouldInclude = !section.optional || (selectedSections && selectedSections.includes(section.id));
           console.log('Section filter:', {
             id: section.id,
             optional: section.optional,
-            selected: finalData.selectedSections?.includes(section.id),
+            selected: selectedSections?.includes(section.id),
             included: shouldInclude
           });
           return shouldInclude;
@@ -112,7 +116,7 @@ export default function NewGrantApplication() {
       // Create grant application sections
       console.log('About to create sections:', {
         sectionsToCreate,
-        selectedSections: finalData.selectedSections,
+        selectedSections: selectedSections,
         grantId: finalData.grantId
       });
 

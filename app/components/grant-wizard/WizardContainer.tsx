@@ -62,11 +62,12 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
     if (stepState?.handleNext) {
       console.log('Calling stepState.handleNext');
       try {
-        await stepState.handleNext();
+        const stepData = await stepState.handleNext();
         // Only advance to next step after successful validation
         if (currentStep === steps.length - 1) {
           console.log('Completing wizard');
-          await handleComplete(formData);
+          const finalData = { ...formData, ...stepData };
+          await handleComplete(finalData);
         } else {
           console.log('Moving to next step');
           setCurrentStep(currentStep + 1);

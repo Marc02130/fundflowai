@@ -76,10 +76,10 @@ export default function OptionalSectionsStep({ onNext, onSave, initialData }: Op
   }, [opportunityId, onSave]);
 
   const handleNext = () => {
-    return new Promise<void>((resolve) => {
+    return new Promise<{ selectedSections: string[] }>((resolve) => {
       console.log('OptionalSectionsStep - handleNext - selectedSections:', selectedSections);
       onNext({ selectedSections });
-      resolve();
+      resolve({ selectedSections });
     });
   };
 
