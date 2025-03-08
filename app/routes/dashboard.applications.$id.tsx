@@ -23,7 +23,7 @@ interface ApplicationSection {
   is_completed: boolean;
 }
 
-interface SectionResponse {
+interface SectionData {
   id: string;
   is_completed: boolean;
   flow_order: number;
@@ -42,6 +42,13 @@ interface Attachment {
   file_path: string;
 }
 
+// Sanitize file name for storage
+const sanitizeFileName = (fileName: string): string => {
+  return fileName
+    .replace(/[^a-zA-Z0-9.-]/g, '_') // Replace any non-alphanumeric chars (except . and -) with _
+    .replace(/_{2,}/g, '_'); // Replace multiple consecutive underscores with a single one
+};
+
 export default function GrantApplicationView() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -53,6 +60,7 @@ export default function GrantApplicationView() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
     async function fetchApplicationData() {
@@ -90,7 +98,7 @@ export default function GrantApplicationView() {
         if (sectionsError) throw sectionsError;
 
         // Transform the data to match our interface
-        const sectionsData = data as unknown as SectionResponse[];
+        const sectionsData = data as unknown as SectionData[];
         const transformedSections = sectionsData.map(section => ({
           id: section.id,
           name: section.grant_sections.name,
@@ -167,7 +175,8 @@ export default function GrantApplicationView() {
     try {
       for (const file of Array.from(files)) {
         const fileId = crypto.randomUUID();
-        const filePath = `${application.id}/${fileId}-${file.name}`;
+        const sanitizedName = sanitizeFileName(file.name);
+        const filePath = `${application.id}/${fileId}-${sanitizedName}`;
 
         // Upload file to Supabase Storage
         const { error: uploadError } = await supabase.storage
@@ -265,6 +274,80 @@ export default function GrantApplicationView() {
     }
   };
 
+  const handleGenerateGrant = async () => {
+    if (!id || generating) return;
+
+    try {
+      setGenerating(true);
+      setError(null);
+
+      // Get the user's session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('No active session');
+      }
+
+      // Call the edge function
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-grant`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            application_id: id
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Failed to generate grant');
+      }
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error('Failed to generate grant');
+      }
+
+      // Refresh sections data to show updated status
+      const { data: updatedSections, error: sectionsError } = await supabase
+        .from('grant_application_section')
+        .select(`
+          id,
+          is_completed,
+          flow_order,
+          grant_sections (
+            name,
+            description
+          )
+        `)
+        .eq('grant_application_id', id)
+        .order('flow_order');
+
+      if (sectionsError) throw sectionsError;
+
+      // Transform and update sections
+      const transformedSections = updatedSections?.map(section => ({
+        id: section.id,
+        name: section.grant_sections.name,
+        description: section.grant_sections.description,
+        flow_order: section.flow_order,
+        is_completed: section.is_completed
+      })) || [];
+
+      setSections(transformedSections);
+
+    } catch (error) {
+      console.error('Error generating grant:', error);
+      setError(error instanceof Error ? error.message : 'Failed to generate grant');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="max-w-4xl mx-auto py-8 px-4">
@@ -346,19 +429,23 @@ export default function GrantApplicationView() {
         {/* Action Buttons */}
         <div className="flex justify-end space-x-4 mb-6">
           <button
-            onClick={() => {/* TODO: Implement generate functionality */}}
-            disabled={!canGenerateGrant}
+            onClick={handleGenerateGrant}
+            disabled={!canGenerateGrant || generating}
             title={!canGenerateGrant ? 'Requires description and attachments to generate grant' : ''}
             className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
-              canGenerateGrant 
+              canGenerateGrant && !generating
                 ? 'bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500'
                 : 'bg-gray-400 cursor-not-allowed'
             }`}
           >
-            <svg className="mr-2 -ml-1 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M10 3.75a2 2 0 10-4 0 2 2 0 004 0zM17.25 4.5a.75.75 0 00-1.5 0v5.15a3.72 3.72 0 01-2.875 3.622l-1.95.39a.75.75 0 00-.525.67v5.332c0 .414.336.75.75.75h.008a.75.75 0 00.75-.75v-4.923l1.95-.39a5.22 5.22 0 004.042-5.083V4.5zM5.75 15.75a.75.75 0 00-.75.75v2.752a.75.75 0 101.5 0v-2.752a.75.75 0 00-.75-.75zm7.5-12a.75.75 0 00-.75.75v2.752a.75.75 0 101.5 0V4.5a.75.75 0 00-.75-.75z" />
+            <svg className={`mr-2 -ml-1 h-5 w-5 ${generating ? 'animate-spin' : ''}`} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+              {generating ? (
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+              ) : (
+                <path d="M10 3.75a2 2 0 10-4 0 2 2 0 004 0zM17.25 4.5a.75.75 0 00-1.5 0v5.15a3.72 3.72 0 01-2.875 3.622l-1.95.39a.75.75 0 00-.525.67v5.332c0 .414.336.75.75.75h.008a.75.75 0 00.75-.75v-4.923l1.95-.39a5.22 5.22 0 004.042-5.083V4.5zM5.75 15.75a.75.75 0 00-.75.75v2.752a.75.75 0 101.5 0v-2.752a.75.75 0 00-.75-.75zm7.5-12a.75.75 0 00-.75.75v2.752a.75.75 0 101.5 0V4.5a.75.75 0 00-.75-.75z" />
+              )}
             </svg>
-            Generate Grant
+            {generating ? 'Generating...' : 'Generate Grant'}
           </button>
           <div className="relative">
             <input

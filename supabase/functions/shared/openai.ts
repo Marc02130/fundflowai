@@ -4,6 +4,8 @@ import { EdgeFunctionError, ERROR_CODES } from './errors.ts';
 // Initialize OpenAI client
 const openai = new OpenAI({
   apiKey: Deno.env.get('OPENAI_API_KEY'),
+  timeout: 120000, // 2 minute timeout
+  maxRetries: 3
 });
 
 export async function generateText(
