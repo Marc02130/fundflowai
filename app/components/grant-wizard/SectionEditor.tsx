@@ -104,6 +104,14 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
   // Add state for tracking refinement stages
   const [refinementStage, setRefinementStage] = useState<'initial' | 'spelling' | 'logic' | 'requirements' | 'complete' | null>(null);
 
+  // Add state for tracking selected version
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+
+  // Add state for history pagination
+  const [historyPage, setHistoryPage] = useState<number>(1);
+  const [hasMoreHistory, setHasMoreHistory] = useState<boolean>(true);
+  const HISTORY_PAGE_SIZE = 10;
+
   // Load section data, history, and documents
   useEffect(() => {
     async function loadSectionData() {
@@ -148,10 +156,11 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
           .select('*')
           .eq('grant_application_section_id', sectionId)
           .order('created_at', { ascending: false })
-          .limit(10);
+          .range(0, HISTORY_PAGE_SIZE - 1);
 
         if (historyError) throw historyError;
         setHistory(historyData || []);
+        setHasMoreHistory(historyData?.length === HISTORY_PAGE_SIZE);
         
         // Set current field to latest version or create a new one
         if (historyData && historyData.length > 0) {
@@ -367,15 +376,9 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
     const version = history.find(h => h.id === versionId);
     if (!version) return;
 
-    try {
-      // Save current state first
-      await handleSave();
-      // Load selected version
-      setCurrentField(version);
-    } catch (err) {
-      console.error('Error loading version:', err);
-      setError('Failed to load selected version');
-    }
+    // Update selected version and display it
+    setSelectedVersionId(versionId);
+    setCurrentField(version);
   };
 
   const handleOpenAddPrompt = () => {
@@ -837,6 +840,31 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
     }
   };
 
+  const handleLoadMore = async () => {
+    try {
+      const start = historyPage * HISTORY_PAGE_SIZE;
+      const end = start + HISTORY_PAGE_SIZE - 1;
+
+      const { data: moreHistory, error } = await supabase
+        .from('grant_application_section_fields')
+        .select('*')
+        .eq('grant_application_section_id', sectionId)
+        .order('created_at', { ascending: false })
+        .range(start, end);
+
+      if (error) throw error;
+
+      if (moreHistory) {
+        setHistory(prev => [...prev, ...moreHistory]);
+        setHasMoreHistory(moreHistory.length === HISTORY_PAGE_SIZE);
+        setHistoryPage(prev => prev + 1);
+      }
+    } catch (err) {
+      console.error('Error loading more history:', err);
+      setError('Failed to load more history');
+    }
+  };
+
   if (loading) return <div>Loading...</div>;
   if (error) return <div>Error: {error}</div>;
   if (!section || !currentField) return <div>No section data found</div>;
@@ -858,11 +886,11 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
                 Your Instructions
               </label>
               <textarea
-                value={currentField.user_instructions}
+                value={currentField?.user_instructions ?? ''}
                 onChange={(e) => setCurrentField(prev => 
                   prev ? { ...prev, user_instructions: e.target.value } : null
                 )}
-                className="w-full h-32 rounded-md border-2 border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                className="w-full h-32 rounded-md border-2 border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 overflow-y-auto resize-y min-h-[8rem] max-h-[24rem]"
               />
             </div>
 
@@ -872,11 +900,11 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
                   Comments on AI Output
                 </label>
                 <textarea
-                  value={currentField.user_comments_on_ai_output || ''}
+                  value={currentField?.user_comments_on_ai_output ?? ''}
                   onChange={(e) => setCurrentField(prev => 
                     prev ? { ...prev, user_comments_on_ai_output: e.target.value } : null
                   )}
-                  className="w-full h-32 rounded-md border-2 border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                  className="w-full h-32 rounded-md border-2 border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 overflow-y-auto resize-y min-h-[8rem] max-h-[24rem]"
                 />
               </div>
             )}
@@ -1118,12 +1146,14 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
                 {isReviewing ? 'Reviewing...' : 'Review Edits'}
               </button>
             </div>
-            <RichTextEditor
-              content={currentField.ai_output || ''}
-              onChange={(content) => setCurrentField(prev => 
-                prev ? { ...prev, ai_output: content } : null
-              )}
-            />
+            <div className="h-[calc(100vh-12rem)] overflow-y-auto resize-y min-h-[24rem] max-h-[calc(100vh-8rem)] border rounded-md">
+              <RichTextEditor
+                content={currentField?.ai_output || ''}
+                onChange={(content) => setCurrentField(prev => 
+                  prev ? { ...prev, ai_output: content } : null
+                )}
+              />
+            </div>
           </div>
         </div>
 
@@ -1146,13 +1176,20 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
                   <button
                     key={version.id}
                     onClick={() => handleLoadVersion(version.id)}
-                    className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md"
+                    className={`w-full text-left px-3 py-2 text-sm ${
+                      selectedVersionId === version.id 
+                        ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' 
+                        : 'text-gray-700 hover:bg-gray-100'
+                    } rounded-md`}
                   >
                     {new Date(version.created_at).toLocaleString()}
                   </button>
                 ))}
-                {history.length >= 10 && (
-                  <button className="w-full text-center text-sm text-indigo-600 hover:text-indigo-700">
+                {hasMoreHistory && (
+                  <button 
+                    onClick={handleLoadMore}
+                    className="w-full text-center text-sm text-indigo-600 hover:text-indigo-700 py-2"
+                  >
                     Load More
                   </button>
                 )}

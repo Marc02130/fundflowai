@@ -259,12 +259,12 @@ export default function Dashboard() {
 
             <li className="mb-2 pl-4">
               <Link 
-                to="/dashboard/submitted" 
-                className={`flex items-start px-4 py-3 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/submitted') ? 'bg-gray-200 font-semibold' : ''}`}
-                title="Submitted Applications"
+                to="/dashboard/applications" 
+                className={`flex items-start px-4 py-3 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/applications') ? 'bg-gray-200 font-semibold' : ''}`}
+                title="All"
               >
                 <span className="text-xl shrink-0">●</span>
-                {!navCollapsed && <span className="ml-3 break-words">Submitted</span>}
+                {!navCollapsed && <span className="ml-3 break-words">All</span>}
               </Link>
             </li>
 
@@ -309,7 +309,7 @@ export default function Dashboard() {
                   {isActiveRoute('/dashboard') && 'Dashboard'}
                   {isActiveRoute('/dashboard/new') && 'New Application'}
                   {isActiveRoute('/dashboard/unsubmitted') && 'Unsubmitted Applications'}
-                  {isActiveRoute('/dashboard/submitted') && 'Submitted Applications'}
+                  {isActiveRoute('/dashboard/applications') && 'All Applications'}
                 </>
               )}
             </h1>
