@@ -1,5 +1,6 @@
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import { useEffect } from 'react';
 
 interface RichTextEditorProps {
   content: string;
@@ -18,7 +19,13 @@ export default function RichTextEditor({ content, onChange }: RichTextEditorProp
     onUpdate: ({ editor }) => {
       onChange(editor.getHTML());
     }
-  });
+  }, [content]);
+
+  useEffect(() => {
+    if (editor && editor.getHTML() !== content) {
+      editor.commands.setContent(content);
+    }
+  }, [content, editor]);
 
   if (!editor) {
     return null;

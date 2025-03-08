@@ -72,7 +72,7 @@ export async function refineText(
         },
         {
           role: 'user',
-          content: prompt
+          content: `Original Text:\n${originalText}\n\nRefinement Instructions:\n${prompt}`
         }
       ],
       max_tokens: Math.ceil(Math.max(originalText.length * 1.2, 2000)), // Ensure integer value

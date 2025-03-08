@@ -373,12 +373,24 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
 
   // Load historical version
   const handleLoadVersion = async (versionId: string) => {
-    const version = history.find(h => h.id === versionId);
-    if (!version) return;
+    try {
+      // Fetch the complete version data
+      const { data: version, error } = await supabase
+        .from('grant_application_section_fields')
+        .select('*')
+        .eq('id', versionId)
+        .single();
 
-    // Update selected version and display it
-    setSelectedVersionId(versionId);
-    setCurrentField(version);
+      if (error) throw error;
+      if (!version) return;
+
+      // Update selected version and display it
+      setSelectedVersionId(versionId);
+      setCurrentField(version);
+    } catch (err) {
+      console.error('Error loading version:', err);
+      setError('Failed to load version');
+    }
   };
 
   const handleOpenAddPrompt = () => {
