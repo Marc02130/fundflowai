@@ -302,7 +302,7 @@ export default function Dashboard() {
       {/* Main content area */}
       <div className="flex-1">
         <header className="bg-white shadow">
-          <div className="flex items-center py-12 px-6 pb-2">
+          <div className="flex items-center justify-between py-12 px-6 pb-2">
             <h1 className="text-2xl font-bold text-gray-900">
               {sectionName || (
                 <>

@@ -11,6 +11,37 @@ export default function DashboardHome() {
           <h2 className="text-xl font-semibold text-gray-900">Welcome, {profile?.display_name || profile?.first_name || 'User'}!</h2>
           <p className="mt-1 text-sm text-gray-500">{profile?.email}</p>
         </div>
+        <div className="px-6 py-4 border-t border-gray-200">
+          <h2 className="text-lg font-medium text-gray-900 mb-4">Creating a Grant Application</h2>
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <ol className="list-decimal list-inside space-y-4 text-gray-600">
+              <li className="pl-2">
+                <span className="font-medium text-gray-900">Select Organization & Opportunity</span>
+                <p className="mt-1 ml-6">Choose your funding organization and search for available grant opportunities.</p>
+              </li>
+              <li className="pl-2">
+                <span className="font-medium text-gray-900">Enter Basic Information</span>
+                <p className="mt-1 ml-6">Provide your application title and grant type. The description you provide will be used by our AI to generate the first draft of your grant content - make it detailed and specific to get better results.</p>
+              </li>
+              <li className="pl-2">
+                <span className="font-medium text-gray-900">Choose Optional Sections</span>
+                <p className="mt-1 ml-6">Select any additional sections relevant to your application (e.g., inclusion of women and minorities).</p>
+              </li>
+              <li className="pl-2">
+                <span className="font-medium text-gray-900">Complete Sections</span>
+                <p className="mt-1 ml-6">Fill out each section with your content. Required sections are automatically included.</p>
+              </li>
+              <li className="pl-2">
+                <span className="font-medium text-gray-900">Add Supporting Documents</span>
+                <p className="mt-1 ml-6">Upload any necessary attachments to support your application.</p>
+              </li>
+              <li className="pl-2">
+                <span className="font-medium text-gray-900">Generate & Review</span>
+                <p className="mt-1 ml-6">Use AI to help generate content and review your application for completeness.</p>
+              </li>
+            </ol>
+          </div>
+        </div>
       </div>
     </div>
   );
