@@ -57,7 +57,8 @@ Required variables:
 ```env
 VITE_SUPABASE_URL=your_supabase_project_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-VITE_OPENAI_API_KEY=your_openai_api_key
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=your_openai_model
 ```
 
 4. **Start development server**

@@ -14,7 +14,6 @@ interface WizardData {
   grantTypeId?: string;
   resubmission?: boolean;
   selectedSections?: string[];
-  grantId?: string;
   searchTerm?: string;
   amount_requested?: number;
 }
@@ -26,17 +25,15 @@ export default function NewGrantApplication() {
 
   const handleComplete = useCallback(async (data: WizardData) => {
     let sectionsToCreate;
+    // Move finalData declaration outside try block for catch block access
+    const selectedSections = data.selectedSections || wizardData.selectedSections;
+    const finalData: WizardData = {
+      ...wizardData,
+      ...data,
+      selectedSections
+    };
+
     try {
-      // Get the selected sections from either the final step or accumulated wizard data
-      const selectedSections = data.selectedSections || wizardData.selectedSections;
-
-      // Combine the final step data with accumulated wizardData
-      const finalData: WizardData = {
-        ...wizardData,
-        ...data,
-        selectedSections // Explicitly set selectedSections after spreading
-      };
-
       // Get the current user
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       if (userError) throw userError;
@@ -79,11 +76,16 @@ export default function NewGrantApplication() {
         throw applicationError;
       }
 
-      // Fetch all sections (both required and optional) for the grant
+      // Fetch all sections (both required and optional) for the organization
       const { data: allSections, error: sectionsError } = await supabase
         .from('grant_sections')
-        .select('id, flow_order, optional')
-        .eq('grant_id', finalData.grantId)
+        .select(`
+          id, 
+          flow_order, 
+          optional,
+          name
+        `)
+        .eq('organization_id', finalData.organizationId)
         .order('flow_order');
 
       if (sectionsError) throw sectionsError;
@@ -97,9 +99,13 @@ export default function NewGrantApplication() {
 
       sectionsToCreate = allSections
         .filter(section => {
-          const shouldInclude = !section.optional || (selectedSections && selectedSections.includes(section.id));
+          // Include if:
+          // 1. Section is required (optional = false) OR
+          // 2. Section is optional AND was selected
+          const shouldInclude = !section.optional || (section.optional && selectedSections?.includes(section.id));
           console.log('Section filter:', {
             id: section.id,
+            name: section.name,
             optional: section.optional,
             selected: selectedSections?.includes(section.id),
             included: shouldInclude
@@ -117,7 +123,7 @@ export default function NewGrantApplication() {
       console.log('About to create sections:', {
         sectionsToCreate,
         selectedSections: selectedSections,
-        grantId: finalData.grantId
+        organizationId: finalData.organizationId
       });
 
       const { error: createSectionsError } = await supabase
@@ -154,30 +160,13 @@ export default function NewGrantApplication() {
   }) => {
     return new Promise<void>(async (resolve, reject) => {
       try {
-        console.log('Fetching grant_id for opportunity:', data.opportunityId);
-        // First get the grant_id for the selected opportunity
-        const { data: opportunityData, error: opportunityError } = await supabase
-          .from('grant_opportunities')
-          .select('grant_id')
-          .eq('id', data.opportunityId)
-          .single();
-
-        if (opportunityError) {
-          console.error('Error fetching opportunity:', opportunityError);
-          reject(opportunityError);
-          return;
-        }
-
-        console.log('Got grant_id:', opportunityData.grant_id);
-
-        // Save all the data including grant_id
+        // Save organization and opportunity data
         setWizardData((prev) => {
           const newData = {
             ...prev,
             organizationId: data.organizationId,
             opportunityId: data.opportunityId,
-            searchTerm: data.searchTerm,
-            grantId: opportunityData.grant_id
+            searchTerm: data.searchTerm
           };
 
           // Also save to localStorage immediately
@@ -253,12 +242,11 @@ export default function NewGrantApplication() {
     });
   }, []);
 
-  const handleOptionalSectionsSave = useCallback((data: { selectedSections?: string[], grantId: string }) => {
+  const handleOptionalSectionsSave = useCallback((data: { selectedSections?: string[] }) => {
     setWizardData((prev) => {
       const newData = {
         ...prev,
-        selectedSections: data.selectedSections,
-        grantId: data.grantId
+        selectedSections: data.selectedSections
       };
 
       // Save to localStorage immediately
@@ -315,7 +303,8 @@ export default function NewGrantApplication() {
           onSave={handleOptionalSectionsSave}
           initialData={{
             selectedSections: wizardData.selectedSections,
-            opportunityId: wizardData.opportunityId
+            opportunityId: wizardData.opportunityId,
+            organizationId: wizardData.organizationId
           }}
         />
       ),
@@ -327,7 +316,6 @@ export default function NewGrantApplication() {
     wizardData.description,
     wizardData.grantTypeId,
     wizardData.resubmission,
-    wizardData.grantId,
     wizardData.selectedSections,
     wizardData.searchTerm,
     wizardData.amount_requested,

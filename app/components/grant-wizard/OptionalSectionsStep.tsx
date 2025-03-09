@@ -2,7 +2,7 @@
  * Optional Sections Selection Step
  * 
  * Third step in the grant application wizard that handles:
- * - Optional section selection
+ * - Optional section selection for an organization's grant sections
  * - Section ordering
  * - Section dependencies
  * - Auto-saving of selections
@@ -31,46 +31,32 @@ interface Section {
  */
 interface OptionalSectionsStepProps {
   onNext: (data: { selectedSections: string[] }) => void;
-  onSave: (data: { selectedSections?: string[], grantId: string }) => void;
+  onSave: (data: { selectedSections?: string[] }) => void;
   initialData?: {
     selectedSections?: string[];
     opportunityId?: string;
+    organizationId?: string;
   };
 }
 
 export default function OptionalSectionsStep({ onNext, onSave, initialData }: OptionalSectionsStepProps) {
-  const opportunityId = initialData?.opportunityId;
+  const organizationId = initialData?.organizationId;
   const [sections, setSections] = useState<Section[]>([]);
   const [selectedSections, setSelectedSections] = useState<string[]>(initialData?.selectedSections || []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch optional sections for the grant
+  // Fetch optional sections for the organization
   useEffect(() => {
     async function fetchSections() {
-      if (!opportunityId) {
-        setError('No opportunity selected');
+      if (!organizationId) {
+        setError('No organization selected');
         setLoading(false);
         return;
       }
 
       try {
-        // First get the grant_id
-        const { data: opportunityData, error: opportunityError } = await supabase
-          .from('grant_opportunities')
-          .select('grant_id')
-          .eq('id', opportunityId)
-          .single();
-
-        if (opportunityError) throw opportunityError;
-        if (!opportunityData?.grant_id) {
-          throw new Error('No grant_id found for opportunity');
-        }
-
-        // Save the grant_id to wizard data
-        onSave({ grantId: opportunityData.grant_id });
-
-        // Then get the sections
+        // Get the sections for this organization
         const { data, error } = await supabase
           .from('grant_sections')
           .select(`
@@ -80,7 +66,7 @@ export default function OptionalSectionsStep({ onNext, onSave, initialData }: Op
             flow_order
           `)
           .eq('optional', true)
-          .eq('grant_id', opportunityData.grant_id)
+          .eq('organization_id', organizationId)
           .order('flow_order');
 
         if (error) throw error;
@@ -94,7 +80,7 @@ export default function OptionalSectionsStep({ onNext, onSave, initialData }: Op
     }
 
     fetchSections();
-  }, [opportunityId, onSave]);
+  }, [organizationId]);
 
   const handleNext = () => {
     return new Promise<{ selectedSections: string[] }>((resolve) => {
@@ -111,6 +97,7 @@ export default function OptionalSectionsStep({ onNext, onSave, initialData }: Op
         ? prev.filter(id => id !== sectionId)
         : [...prev, sectionId];
       console.log('OptionalSectionsStep - toggleSection - after:', newSelections);
+      onSave({ selectedSections: newSelections });
       return newSelections;
     });
   };
@@ -147,7 +134,7 @@ export default function OptionalSectionsStep({ onNext, onSave, initialData }: Op
   if (sections.length === 0) {
     return (
       <div className="text-center text-gray-500 py-8">
-        No optional sections available for this grant.
+        No optional sections available for this organization.
         <div className="mt-6">
           <button
             type="button"
