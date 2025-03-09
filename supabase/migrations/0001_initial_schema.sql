@@ -123,7 +123,7 @@ create table public.grant_type (
 -- Grant sections: Templates for grant application components
 create table public.grant_sections (
   id uuid not null default gen_random_uuid (),
-  grant_id uuid not null,
+  organization_id uuid null,
   name character varying(255) not null,
   description text null,
   created_at timestamp without time zone not null default now(),
@@ -137,7 +137,7 @@ create table public.grant_sections (
   document_package public.document_package_type null default 'Full Proposal'::document_package_type,
   instructions text null,  -- Instructions to grant writer for section
   constraint grant_sections_pkey primary key (id),
-  constraint grant_sections_grant_id_fkey foreign KEY (grant_id) references grants (id)
+  constraint grant_sections_organization_id_fkey foreign KEY (organization_id) references organizations (id)
 ) TABLESPACE pg_default;
 
 -- Grant requirements: Specific criteria for grant applications
