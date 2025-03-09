@@ -2,6 +2,21 @@ import { Link } from "react-router-dom";
 import { useAuth } from "~/context/AuthContext";
 import type { Route } from "./+types/home";
 
+/**
+ * Home Page Route
+ * 
+ * Landing page for the application showcasing features
+ * and providing access to authentication.
+ * 
+ * Features:
+ * - Feature showcase
+ * - Value proposition
+ * - Call-to-action buttons
+ * - Navigation to auth
+ * 
+ * @route /
+ */
+
 export function meta({}: Route.MetaArgs) {
   return [
     { title: "Fund Flow AI - Grant Writing Assistant" },
@@ -14,6 +29,12 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
+/**
+ * Home Page Component
+ * 
+ * @component
+ * @param {Object} props - Component props
+ */
 export default function Home() {
   const { user } = useAuth();
 

@@ -1,6 +1,24 @@
+/**
+ * Optional Sections Selection Step
+ * 
+ * Third step in the grant application wizard that handles:
+ * - Optional section selection
+ * - Section ordering
+ * - Section dependencies
+ * - Auto-saving of selections
+ * 
+ * Features:
+ * - Real-time updates
+ * - Section descriptions
+ * - Validation of selections
+ */
+
 import { useState, useEffect } from 'react';
 import { supabase } from '~/lib/supabase';
 
+/**
+ * Section data structure from database
+ */
 interface Section {
   id: string;
   name: string;
@@ -8,6 +26,9 @@ interface Section {
   flow_order?: number;
 }
 
+/**
+ * Component props including callbacks and initial state
+ */
 interface OptionalSectionsStepProps {
   onNext: (data: { selectedSections: string[] }) => void;
   onSave: (data: { selectedSections?: string[], grantId: string }) => void;

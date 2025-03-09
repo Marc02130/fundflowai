@@ -1,3 +1,11 @@
+/**
+ * Error handling module for Edge Functions.
+ * @module errors
+ */
+
+/**
+ * Standard error response format.
+ */
 export interface ErrorResponse {
   success: false;
   error: {
@@ -7,7 +15,17 @@ export interface ErrorResponse {
   };
 }
 
+/**
+ * Custom error class for Edge Function errors.
+ */
 export class EdgeFunctionError extends Error {
+  /**
+   * Creates a new EdgeFunctionError.
+   * @param {string} code - Error code from ERROR_CODES
+   * @param {string} message - Error message
+   * @param {Record<string, any>} [details] - Additional error details
+   * @param {number} [statusCode=400] - HTTP status code
+   */
   constructor(
     public code: string,
     message: string,
@@ -19,6 +37,9 @@ export class EdgeFunctionError extends Error {
   }
 }
 
+/**
+ * Standard error codes used across Edge Functions.
+ */
 export const ERROR_CODES = {
   AUTH_ERROR: 'auth/error',
   INVALID_INPUT: 'input/invalid',
@@ -29,6 +50,13 @@ export const ERROR_CODES = {
   API_ERROR: 'api/error'
 } as const;
 
+/**
+ * Handles errors and converts them to standardized responses.
+ * @param {unknown} error - The error to handle
+ * @param {object} [options] - Additional options
+ * @param {Record<string, string>} [options.headers] - Additional response headers
+ * @returns {Response} Standardized error response
+ */
 export function handleError(error: unknown, options?: { headers?: Record<string, string> }): Response {
   const headers = {
     'Content-Type': 'application/json',

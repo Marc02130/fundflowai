@@ -1,12 +1,33 @@
+/**
+ * Grant Type and Basic Information Step
+ * 
+ * First step in the grant application wizard that collects:
+ * - Grant type selection
+ * - Application title and description
+ * - Amount requested
+ * - Resubmission status
+ * 
+ * Features:
+ * - Real-time validation
+ * - Auto-saving
+ * - Organization-specific grant types
+ */
+
 import { useState, useEffect } from 'react';
 import { supabase } from '~/lib/supabase';
 
+/**
+ * Grant type definition from database
+ */
 interface GrantType {
   id: string;
   name: string;
   description: string;
 }
 
+/**
+ * Component props including callbacks and initial state
+ */
 interface GrantTypeBasicInfoStepProps {
   onNext: (data: {
     title: string;

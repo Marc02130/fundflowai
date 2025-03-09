@@ -1,8 +1,16 @@
+/**
+ * Authentication context for managing user sessions and profile data.
+ * Integrates with Supabase auth and database for persistent storage.
+ */
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { supabase } from '~/lib/supabase';
 import type { AuthError, User, UserResponse, AuthResponse, Session } from '@supabase/supabase-js';
 
+/**
+ * User profile data stored in the database.
+ * Extends basic auth user data with application-specific fields.
+ */
 type UserProfile = {
   id: string;
   email?: string;
@@ -13,6 +21,10 @@ type UserProfile = {
   role?: string;
 };
 
+/**
+ * Authentication context interface defining available
+ * state and methods for auth operations.
+ */
 type AuthContextType = {
   user: User | null;
   profile: UserProfile | null;
@@ -26,15 +38,17 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/**
+ * Provider component that wraps the app and makes auth available to all child components.
+ * Handles session persistence and real-time auth state updates.
+ */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Load user on mount
   useEffect(() => {
-    // Check for existing session
     const checkUser = async () => {
       const { data } = await supabase.auth.getSession();
       setSession(data.session);
@@ -46,7 +60,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       setLoading(false);
       
-      // Listen for auth state changes
       const { data: authListener } = supabase.auth.onAuthStateChange(
         async (event, session) => {
           setSession(session);
@@ -68,7 +81,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     checkUser();
   }, []);
 
-  // Fetch user profile data
+  /**
+   * Fetches user profile data from the database.
+   * Called automatically when auth state changes.
+   */
   const fetchProfile = async (userId: string) => {
     try {
       const { data, error } = await supabase
@@ -89,7 +105,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Sign in with email and password
+  /**
+   * Authenticates user with email and password.
+   * Updates auth state on successful login.
+   */
   const signIn = async (email: string, password: string) => {
     try {
       const { error } = await supabase.auth.signInWithPassword({
@@ -104,14 +123,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Sign up with email and password
+  /**
+   * Creates new user account and profile.
+   * Handles both auth signup and profile creation in database.
+   */
   const signUp = async (
     email: string, 
     password: string, 
     userData?: { firstName?: string; lastName?: string }
   ) => {
     try {
-      // First, sign up the user with Supabase Auth
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
@@ -126,11 +147,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (error) return { error };
       
-      // If signup was successful and we have a user, create a profile
       if (data?.user) {
         const userId = data.user.id;
         
-        // Create a new profile record
         const newProfile: UserProfile = {
           id: userId,
           email: email,
@@ -141,15 +160,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             : email.split('@')[0],
         };
         
-        // Insert the new profile into the user_profiles table
         const { error: profileError } = await supabase
           .from('user_profiles')
           .insert(newProfile);
         
         if (profileError) {
           console.error('Error creating user profile during signup:', profileError);
-          // We don't return this error as it would prevent the user from signing up
-          // Instead, we log it and will attempt to create the profile again later
         } else {
           console.log('User profile created successfully during signup');
           setProfile(newProfile);
@@ -163,7 +179,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Sign out
+  /**
+   * Ends the current user session and clears auth state.
+   */
   const signOut = async () => {
     try {
       await supabase.auth.signOut();
@@ -173,7 +191,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Update user profile
+  /**
+   * Updates user profile data in the database.
+   * Requires authenticated user session.
+   */
   const updateProfile = async (updates: Partial<UserProfile>) => {
     try {
       if (!user) throw new Error('User not authenticated');
@@ -185,7 +206,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (error) throw error;
       
-      // Refresh profile after update
       if (profile) {
         setProfile({ ...profile, ...updates });
       }
@@ -215,6 +235,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * Hook that provides access to the auth context.
+ * Must be used within an AuthProvider component.
+ */
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {

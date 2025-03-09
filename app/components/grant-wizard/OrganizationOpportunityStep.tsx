@@ -1,11 +1,27 @@
+/**
+ * Organization and Opportunity Selection Step
+ * 
+ * Second step in the grant application wizard that handles:
+ * - Organization selection from available grant funders
+ * - Grant opportunity search and selection
+ * - Real-time opportunity filtering
+ * - Deadline validation
+ */
+
 import { useState, useEffect } from 'react';
 import { supabase } from '~/lib/supabase';
 
+/**
+ * Basic organization information
+ */
 interface Organization {
   id: string;
   name: string;
 }
 
+/**
+ * Grant opportunity details
+ */
 interface GrantOpportunity {
   id: string;
   title: string;
@@ -13,6 +29,9 @@ interface GrantOpportunity {
   expiration_date: string;
 }
 
+/**
+ * Component props including callback handlers and initial state
+ */
 interface OrganizationOpportunityStepProps {
   onNext: (data: { 
     organizationId: string;

@@ -1,3 +1,18 @@
+/**
+ * Single Application View
+ * 
+ * Detailed view of a grant application with section management
+ * and AI-assisted content generation.
+ * 
+ * Features:
+ * - Section status tracking
+ * - AI content generation
+ * - Document management
+ * - Real-time collaboration
+ * 
+ * @route /dashboard/applications/:id
+ */
+
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '~/lib/supabase';
@@ -49,6 +64,12 @@ const sanitizeFileName = (fileName: string): string => {
     .replace(/_{2,}/g, '_'); // Replace multiple consecutive underscores with a single one
 };
 
+/**
+ * Single Application Component
+ * 
+ * @component
+ * @param {Object} props - Component props
+ */
 export default function GrantApplicationView() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -576,4 +597,4 @@ export default function GrantApplicationView() {
       </div>
     </div>
   );
-} 
+}

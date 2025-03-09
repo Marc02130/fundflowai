@@ -1,3 +1,18 @@
+/**
+ * Main Dashboard Layout
+ * 
+ * Provides the primary layout structure for all dashboard views.
+ * Handles navigation, user context, and common UI elements.
+ * 
+ * Features:
+ * - Responsive sidebar navigation
+ * - User profile menu
+ * - Organization context
+ * - Protected route wrapper
+ * 
+ * @route /dashboard/*
+ */
+
 import { useEffect, useState } from 'react';
 import { useNavigate, Link, Outlet, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from '~/context/AuthContext';
@@ -12,6 +27,13 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
+/**
+ * Dashboard Layout Component
+ * 
+ * @component
+ * @param {Object} props - Component props
+ * @param {ReactNode} props.children - Child routes to render
+ */
 export default function Dashboard() {
   const { user, profile, loading, signOut } = useAuth();
   const navigate = useNavigate();
@@ -322,4 +344,4 @@ export default function Dashboard() {
       </div>
     </div>
   );
-} 
+}

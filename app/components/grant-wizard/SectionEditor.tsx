@@ -1,3 +1,19 @@
+/**
+ * Grant Section Editor
+ * 
+ * Rich text editor component for grant application sections.
+ * Features AI-assisted content generation, document management,
+ * and real-time collaboration capabilities.
+ * 
+ * Key Features:
+ * - AI content generation and refinement
+ * - Rich text editing with formatting
+ * - Document attachments and management
+ * - Version history tracking
+ * - Real-time collaboration
+ * - Auto-saving
+ */
+
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '~/lib/supabase';
@@ -8,6 +24,9 @@ interface SectionEditorProps {
   sectionId: string;
 }
 
+/**
+ * Section data including content and metadata
+ */
 interface SectionData {
   id: string;
   grant_application_id: string;

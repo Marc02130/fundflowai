@@ -1,3 +1,12 @@
+/**
+ * Generate Grant Edge Function
+ * 
+ * Handles automated generation of complete grant applications by processing multiple sections
+ * in parallel. Optimizes performance through single-pass generation and minimal database operations.
+ * 
+ * @module generate-grant
+ */
+
 import { createClient } from '@supabase/supabase-js';
 import { handleError, EdgeFunctionError, ERROR_CODES } from '../shared/errors.ts';
 import { validateUserSession, validateUserAccess } from '../shared/auth.ts';
@@ -17,7 +26,12 @@ const corsHeaders = {
   'Access-Control-Max-Age': '86400',
 };
 
-// Create field for section
+/**
+ * Creates a field for a grant application section
+ * @param {string} sectionId - ID of the section to create field for
+ * @returns {Promise<Object>} Created field data
+ * @throws {EdgeFunctionError} If field creation fails
+ */
 async function createField(sectionId: string) {
   const { data: field, error } = await supabase
     .from('grant_application_section_fields')
@@ -34,7 +48,14 @@ async function createField(sectionId: string) {
   return field;
 }
 
-// Update field with generation result
+/**
+ * Updates a field with AI generation results
+ * @param {string} fieldId - ID of the field to update
+ * @param {string} aiOutput - Generated content
+ * @param {string} stage - Processing stage identifier
+ * @param {boolean} [failed=false] - Whether generation failed
+ * @throws {EdgeFunctionError} If update fails
+ */
 async function updateField(fieldId: string, aiOutput: string, stage: string, failed: boolean = false) {
   const { error } = await supabase
     .from('grant_application_section_fields')
@@ -50,7 +71,12 @@ async function updateField(fieldId: string, aiOutput: string, stage: string, fai
   }
 }
 
-// Get application data including sections and attachments
+/**
+ * Retrieves complete application data including sections and attachments
+ * @param {string} applicationId - ID of the grant application
+ * @returns {Promise<Object>} Combined application data with sections and attachments
+ * @throws {EdgeFunctionError} If data retrieval fails
+ */
 async function getApplicationData(applicationId: string) {
   try {
     // Get base application
@@ -125,7 +151,14 @@ async function getApplicationData(applicationId: string) {
   }
 }
 
-// Process single section
+/**
+ * Processes a single section of the grant application
+ * @param {Object} section - Section data to process
+ * @param {Object} application - Parent application data
+ * @param {number} [retryCount=1] - Number of remaining retry attempts
+ * @returns {Promise<Object>} Processing result with status
+ * @throws {EdgeFunctionError} If processing fails
+ */
 async function processSection(section: any, application: any, retryCount: number = 1) {
   try {
     // Create field
@@ -188,7 +221,17 @@ Please try regenerating this section or contact support if the issue persists.
   }
 }
 
-// Main handler
+/**
+ * Main handler for the generate-grant Edge Function
+ * 
+ * Processes:
+ * 1. Validates request and user session
+ * 2. Processes all sections in parallel
+ * 3. Updates section statuses
+ * 4. Returns consolidated results
+ * 
+ * @throws {EdgeFunctionError} For validation or processing errors
+ */
 Deno.serve({
   onListen: ({ port, hostname }) => {
     console.log(`Server started at http://${hostname}:${port}`);

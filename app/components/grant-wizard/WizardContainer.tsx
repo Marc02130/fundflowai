@@ -1,19 +1,41 @@
+/**
+ * Grant Application Wizard Container
+ * 
+ * Core wizard component that manages the multi-step grant application process.
+ * Handles state persistence, step navigation, and data collection across steps.
+ */
+
 import { useState, useMemo, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import React from 'react';
 
+/**
+ * Defines the structure of each wizard step
+ */
 interface WizardStep {
   title: string;
   component: ReactNode;
 }
 
+/**
+ * Props for the wizard container
+ */
 interface WizardContainerProps {
   steps: WizardStep[];
   onComplete: (data: any) => void;
 }
 
+// Local storage key for persisting wizard state
 export const WIZARD_STATE_KEY = 'grant_wizard_state';
 
+/**
+ * Main wizard container component
+ * Manages:
+ * - Step navigation and state
+ * - Form data persistence
+ * - Step validation
+ * - Progress tracking
+ */
 export default function WizardContainer({ steps, onComplete }: WizardContainerProps) {
   // Initialize state from localStorage if it exists
   const [currentStep, setCurrentStep] = useState(() => {
@@ -34,7 +56,10 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
     return {};
   });
 
-  // Save state when it changes
+  /**
+   * Persists wizard state to localStorage whenever
+   * current step or form data changes
+   */
   useEffect(() => {
     localStorage.setItem(WIZARD_STATE_KEY, JSON.stringify({
       step: currentStep,
@@ -42,20 +67,33 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
     }));
   }, [currentStep, formData]);
 
+  // Memoized current step component
   const currentComponent = useMemo(() => steps[currentStep].component, [steps, currentStep]);
 
+  /**
+   * Handles navigation to previous step
+   * Only enabled when not on first step
+   */
   const handleBack = () => {
     if (currentStep > 0) {
       setCurrentStep(currentStep - 1);
     }
   };
 
-  // Save form data without navigation
+  /**
+   * Saves form data without navigation
+   * Used for auto-saving and partial updates
+   */
   const saveFormData = (stepData: any) => {
     const newFormData = { ...formData, ...stepData };
     setFormData(newFormData);
   };
 
+  /**
+   * Handles navigation to next step
+   * Validates current step before proceeding
+   * Completes wizard on final step
+   */
   const handleNext = async () => {
     console.log('Next button clicked');
     const stepState = (window as any).currentStepState;
@@ -63,7 +101,6 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
       console.log('Calling stepState.handleNext');
       try {
         const stepData = await stepState.handleNext();
-        // Only advance to next step after successful validation
         if (currentStep === steps.length - 1) {
           console.log('Completing wizard');
           const finalData = { ...formData, ...stepData };
@@ -78,10 +115,14 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
     }
   };
 
+  /**
+   * Handles wizard completion
+   * Calls onComplete callback with final data
+   * Cleans up wizard state on success
+   */
   const handleComplete = async (finalData: any) => {
     try {
       await onComplete(finalData);
-      // Clear wizard state after successful completion
       localStorage.removeItem(WIZARD_STATE_KEY);
     } catch (error) {
       console.error('Error completing wizard:', error);

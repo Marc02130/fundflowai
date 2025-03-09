@@ -1,3 +1,8 @@
+/**
+ * OpenAI integration module for text generation and refinement.
+ * @module openai
+ */
+
 import { OpenAI } from 'openai';
 import { EdgeFunctionError, ERROR_CODES } from './errors.ts';
 
@@ -8,6 +13,15 @@ const openai = new OpenAI({
   maxRetries: 3
 });
 
+/**
+ * Generates text using OpenAI's GPT model.
+ * @param {string} prompt - The input prompt for text generation
+ * @param {string} [model='gpt-4'] - The OpenAI model to use
+ * @param {number} [maxTokens=2000] - Maximum tokens in the response
+ * @param {number} [temperature=0.7] - Randomness of the output (0-1)
+ * @returns {Promise<string>} Generated text
+ * @throws {EdgeFunctionError} If text generation fails
+ */
 export async function generateText(
   prompt: string,
   model: string = 'gpt-4',
@@ -47,11 +61,20 @@ export async function generateText(
     console.error('OpenAI Generation Error:', error);
     throw new EdgeFunctionError(
       ERROR_CODES.AI_ERROR,
-      `Failed to generate text: ${error.message}`
+      `Failed to generate text: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 }
 
+/**
+ * Refines text based on specific refinement stage and instructions.
+ * @param {string} originalText - The text to be refined
+ * @param {string} stage - The refinement stage (e.g., 'spelling', 'logic')
+ * @param {string} prompt - Instructions for refinement
+ * @param {string} [model='gpt-4'] - The OpenAI model to use
+ * @returns {Promise<string>} Refined text
+ * @throws {EdgeFunctionError} If text refinement fails
+ */
 export async function refineText(
   originalText: string,
   stage: string,
@@ -91,7 +114,7 @@ export async function refineText(
     console.error('OpenAI Refinement Error:', error);
     throw new EdgeFunctionError(
       ERROR_CODES.AI_ERROR,
-      `Failed to refine text (${stage}): ${error.message}`
+      `Failed to refine text (${stage}): ${error instanceof Error ? error.message : String(error)}`
     );
   }
 } 

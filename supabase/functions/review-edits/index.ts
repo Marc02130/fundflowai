@@ -1,3 +1,12 @@
+/**
+ * Review Edits Edge Function
+ * 
+ * Reviews and improves manually edited grant application content using AI assistance.
+ * Maintains user's intent while enhancing academic quality and style.
+ * 
+ * @module review-edits
+ */
+
 import { createClient } from '@supabase/supabase-js';
 import { handleError, EdgeFunctionError, ERROR_CODES } from '../shared/errors.ts';
 import { validateUserSession, validateUserAccess } from '../shared/auth.ts';
@@ -9,8 +18,14 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_ANON_KEY') ?? ''
 );
 
-
-// Get section data with latest ai_output
+/**
+ * Retrieves section data and related information for review.
+ * Includes grant application, opportunity, requirements, and field data.
+ * 
+ * @param {string} sectionId - ID of the grant section to retrieve
+ * @returns {Promise<Object>} Combined section data with related information
+ * @throws {EdgeFunctionError} If data retrieval fails or section not found
+ */
 async function getSectionData(sectionId: string) {
   console.log("=== Getting Section Data ===");
   console.log("Section ID:", sectionId);
@@ -119,7 +134,20 @@ async function getSectionData(sectionId: string) {
   }
 }
 
-// Save new section field with review results
+/**
+ * Saves a new section field with review results.
+ * Creates a new version of the field with improved content.
+ * 
+ * @param {string} sectionId - ID of the grant section
+ * @param {string} aiOutput - Improved content from AI review
+ * @param {Object} previousField - Previous field data
+ * @param {string} previousField.id - ID of the previous field
+ * @param {string|null} previousField.user_instructions - User's instructions
+ * @param {string|null} previousField.user_comments_on_ai_output - User's comments
+ * @param {string|null} previousField.ai_model - AI model used
+ * @returns {Promise<Object>} Newly created field data
+ * @throws {EdgeFunctionError} If save operation fails
+ */
 async function saveNewSectionField(sectionId: string, aiOutput: string, previousField: {
   id: string;
   user_instructions: string | null;
@@ -153,7 +181,17 @@ const corsHeaders = {
   'Access-Control-Max-Age': '86400',
 };
 
-// Main handler
+/**
+ * Main handler for the review-edits Edge Function.
+ * Processes grant content through multiple review stages:
+ * 1. Spelling and grammar check
+ * 2. Logical errors check
+ * 3. Requirements compliance check (if requirements exist)
+ * 
+ * @param {Request} request - HTTP request object
+ * @returns {Promise<Response>} HTTP response with review results
+ * @throws {EdgeFunctionError} For validation or processing errors
+ */
 Deno.serve(async (request) => {
   console.log("=== HANDLER START ===");
   console.log("Request method:", request.method);

@@ -40,6 +40,20 @@ interface Application {
   updated_at: string;
 }
 
+/**
+ * Applications List View
+ * 
+ * Displays a list of user's grant applications with filtering and sorting.
+ * Provides quick actions and status management for applications.
+ * 
+ * Features:
+ * - Application status filtering
+ * - Sort by date, status, or title
+ * - Quick actions menu
+ * - Real-time updates
+ * 
+ * @route /dashboard/applications
+ */
 export default function Applications() {
   const { user } = useAuth();
   const [applications, setApplications] = useState<Application[]>([]);
@@ -241,4 +255,4 @@ export default function Applications() {
       </div>
     </div>
   );
-} 
+}

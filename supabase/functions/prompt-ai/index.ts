@@ -1,3 +1,12 @@
+/**
+ * Prompt AI Edge Function
+ * 
+ * Generates and refines grant application content using AI assistance.
+ * Uses OpenAI's GPT models with multiple refinement stages to ensure quality and compliance.
+ * 
+ * @module prompt-ai
+ */
+
 import { createClient } from '@supabase/supabase-js';
 import { handleError, EdgeFunctionError, ERROR_CODES } from '../shared/errors.ts';
 import { validateUserSession, validateUserAccess } from '../shared/auth.ts';
@@ -17,7 +26,12 @@ const corsHeaders = {
   'Access-Control-Max-Age': '86400',
 };
 
-// Custom error response function
+/**
+ * Creates a standardized error response with CORS headers.
+ * @param {Error} error - Error object to format
+ * @param {number} status - HTTP status code
+ * @returns {Response} Formatted error response
+ */
 function errorResponse(error: Error, status: number = 400) {
   return new Response(
     JSON.stringify({
@@ -36,7 +50,13 @@ function errorResponse(error: Error, status: number = 400) {
   );
 }
 
-// Get section data step by fucking step
+/**
+ * Retrieves complete section data including related information.
+ * Fetches base section, grant section, application, opportunity, and requirements.
+ * @param {string} sectionId - ID of the grant section
+ * @returns {Promise<Object>} Combined section data
+ * @throws {EdgeFunctionError} If any data retrieval fails
+ */
 async function getSectionData(sectionId: string) {
   console.log('=== Getting Section Data ===');
   console.log('Section ID:', sectionId);
@@ -109,7 +129,12 @@ async function getSectionData(sectionId: string) {
   }
 }
 
-// Get user prompt
+/**
+ * Retrieves a user's custom prompt.
+ * @param {string} promptId - ID of the custom prompt
+ * @returns {Promise<{prompt_text: string}>} Prompt data
+ * @throws {EdgeFunctionError} If prompt not found or inactive
+ */
 async function getUserPrompt(promptId: string) {
   const { data, error } = await supabase
     .from('user_ai_prompts')
@@ -132,7 +157,12 @@ async function getUserPrompt(promptId: string) {
   return data;
 }
 
-// Get section attachments
+/**
+ * Gets all attachments for a section.
+ * @param {string} sectionId - ID of the grant section
+ * @returns {Promise<Array<Object>>} List of attachments
+ * @throws {EdgeFunctionError} If retrieval fails
+ */
 async function getSectionAttachments(sectionId: string) {
   console.log("=== Getting Section Attachments ===");
   const { data: attachments, error: attachmentsError } = await supabase
@@ -149,7 +179,12 @@ async function getSectionAttachments(sectionId: string) {
   return attachments;
 }
 
-// Get field data
+/**
+ * Retrieves field data for content generation.
+ * @param {string} fieldId - ID of the field
+ * @returns {Promise<Object>} Field data
+ * @throws {EdgeFunctionError} If field not found
+ */
 async function getFieldData(fieldId: string) {
   const { data, error } = await supabase
     .from('grant_application_section_fields')
@@ -168,7 +203,13 @@ async function getFieldData(fieldId: string) {
   return data;
 }
 
-// Update field with new content and stage
+/**
+ * Updates field with new AI-generated content.
+ * @param {string} fieldId - ID of the field to update
+ * @param {string} aiOutput - Generated content
+ * @param {string} stage - Processing stage identifier
+ * @throws {EdgeFunctionError} If update fails
+ */
 async function updateField(fieldId: string, aiOutput: string, stage: string) {
   const { error } = await supabase
     .from('grant_application_section_fields')
@@ -184,7 +225,16 @@ async function updateField(fieldId: string, aiOutput: string, stage: string) {
   }
 }
 
-// Main handler
+/**
+ * Main handler for content generation.
+ * Processes content through multiple stages:
+ * 1. Initial generation with context
+ * 2. Spelling and grammar check
+ * 3. Logical consistency review
+ * 4. Requirements compliance verification
+ * 
+ * @throws {EdgeFunctionError} For validation or processing errors
+ */
 Deno.serve(async (req) => {
   // Handle CORS preflight request
   if (req.method === 'OPTIONS') {

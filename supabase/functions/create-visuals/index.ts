@@ -2,6 +2,15 @@ import { createClient } from '@supabase/supabase-js';
 import { handleError, EdgeFunctionError, ERROR_CODES } from './errors';
 import { validateUserSession, validateUserAccess } from './auth';
 
+/**
+ * Create Visuals Edge Function
+ * 
+ * Handles the generation and management of AI-powered visualizations for grant applications
+ * using OpenAI's image variation API. Manages file storage and document records.
+ * 
+ * @module create-visuals
+ */
+
 // Create Supabase client
 // @ts-ignore
 const supabase = globalThis.supabase || (() => {
@@ -16,7 +25,12 @@ const supabase = globalThis.supabase || (() => {
   });
 })();
 
-// Get section data with latest field
+/**
+ * Retrieves section data including grant section details
+ * @param {string} sectionId - ID of the section to fetch
+ * @returns {Promise<Object>} Combined section and grant section data
+ * @throws {EdgeFunctionError} If section or grant section not found
+ */
 async function getSectionData(sectionId: string) {
   // First get the section data
   const { data: sectionData, error: sectionError } = await supabase
@@ -60,7 +74,13 @@ async function getSectionData(sectionId: string) {
   };
 }
 
-// Get document data
+/**
+ * Retrieves document data for a specific image
+ * @param {string} sectionId - ID of the section
+ * @param {string} imagePath - Path to the image in storage
+ * @returns {Promise<Object>} Document metadata
+ * @throws {EdgeFunctionError} If document not found or database error
+ */
 async function getDocumentData(sectionId: string, imagePath: string) {
   // First check section-specific documents
   const { data: sectionDoc, error: sectionError } = await supabase
@@ -103,7 +123,14 @@ async function getDocumentData(sectionId: string, imagePath: string) {
   throw new EdgeFunctionError(ERROR_CODES.NOT_FOUND, 'Image not found', undefined, 404);
 }
 
-// Generate and save visualization
+/**
+ * Generates and saves an AI visualization
+ * @param {string} sectionId - ID of the section
+ * @param {string} imagePath - Path to source image
+ * @param {string} prompt - Generation prompt
+ * @returns {Promise<Object>} Created document record
+ * @throws {EdgeFunctionError} If generation, storage, or database operations fail
+ */
 async function generateAndSaveVisual(sectionId: string, imagePath: string, prompt: string) {
   console.log("Starting generateAndSaveVisual with:", { sectionId, imagePath, prompt });
 
@@ -214,7 +241,17 @@ const corsHeaders = {
   'Access-Control-Max-Age': '86400',
 };
 
-// Main handler
+/**
+ * Main handler for the create-visuals Edge Function
+ * 
+ * Processes:
+ * 1. Validates request and user session
+ * 2. Downloads and processes source image
+ * 3. Generates AI variation
+ * 4. Saves result and creates document record
+ * 
+ * @throws {EdgeFunctionError} For validation or processing errors
+ */
 Deno.serve(async (request) => {
   // Handle CORS preflight request
   if (request.method === 'OPTIONS') {

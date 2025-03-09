@@ -1,3 +1,18 @@
+/**
+ * Authentication Route
+ * 
+ * Handles user authentication flows including login, signup,
+ * password reset, and OAuth integrations.
+ * 
+ * Features:
+ * - Email/password authentication
+ * - OAuth provider integration
+ * - Password reset flow
+ * - Session management
+ * 
+ * @route /auth
+ */
+
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '~/context/AuthContext';
@@ -11,6 +26,12 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
+/**
+ * Authentication Component
+ * 
+ * @component
+ * @param {Object} props - Component props
+ */
 export default function Auth() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [formData, setFormData] = useState<SignUpFormData>({

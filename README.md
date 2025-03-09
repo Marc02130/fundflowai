@@ -1,102 +1,203 @@
-Fund Flow AI - An AI assisted grant writing tool
+# Fund Flow AI
 
-# Welcome to React Router!
+AI-assisted grant writing and management platform.
 
-A modern, production-ready template for building full-stack React applications using React Router.
+## Overview
 
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/remix-run/react-router-templates/tree/main/default)
+Fund Flow AI streamlines the grant application process using AI assistance for content generation, refinement, and visualization. The platform integrates with Supabase for data storage and AWS Amplify for deployment.
 
 ## Features
 
-- 🚀 Server-side rendering
-- ⚡️ Hot Module Replacement (HMR)
-- 📦 Asset bundling and optimization
-- 🔄 Data loading and mutations
-- 🔒 TypeScript by default
-- 🎉 TailwindCSS for styling
-- 📖 [React Router docs](https://reactrouter.com/)
+- 🤖 AI-assisted content generation
+- 📝 Rich text editing
+- 🖼️ AI visualization generation
+- 📋 Grant application management
+- 👥 Multi-user collaboration
+- 🔄 Real-time updates
+- 📱 Responsive design
+- 🎨 Modern UI with TailwindCSS
 
-## Getting Started
+## Tech Stack
 
-### Installation
+- React + TypeScript
+- Supabase (Database & Auth)
+- AWS Amplify (Hosting)
+- TailwindCSS (Styling)
+- OpenAI (AI Services)
 
-Install the dependencies:
+## Prerequisites
 
+- Node.js 18+
+- npm or pnpm
+- Supabase account
+- AWS account
+- OpenAI API key
+
+## Local Development Setup
+
+1. **Clone the repository**
+```bash
+git clone https://github.com/yourusername/fundflowai.git
+cd fundflowai
+```
+
+2. **Install dependencies**
 ```bash
 npm install
+# or
+pnpm install
 ```
 
-### Development
+3. **Configure environment variables**
+```bash
+cp .env.example .env.local
+```
 
-Start the development server with HMR:
+Required variables:
+```env
+VITE_SUPABASE_URL=your_supabase_project_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+VITE_OPENAI_API_KEY=your_openai_api_key
+```
 
+4. **Start development server**
 ```bash
 npm run dev
+# or
+pnpm dev
 ```
 
-Your application will be available at `http://localhost:5173`.
+## Supabase Setup
 
-## Building for Production
+1. **Create Supabase Project**
+   - Go to [Supabase Dashboard](https://app.supabase.io)
+   - Click "New Project"
+   - Fill in project details
 
-Create a production build:
+2. **Database Setup**
+   - Navigate to SQL Editor
+   - Run migrations from `/supabase/migrations` in order
+   - Verify tables and functions are created
 
+3. **Authentication Setup**
+   - Enable Email/Password sign-up
+   - Configure OAuth providers (optional)
+   - Set up email templates
+
+4. **Storage Setup**
+   - Create 'grant-attachments' bucket
+   - Configure CORS policies
+   - Set up storage rules
+
+5. **Edge Functions**
+   - Deploy functions from `/supabase/functions`:
 ```bash
-npm run build
+supabase functions deploy generate-grant
+supabase functions deploy prompt-ai
+supabase functions deploy create-visuals
+supabase functions deploy review-edits
 ```
 
-## Deployment
+## AWS Amplify Deployment
 
-### Docker Deployment
-
-This template includes three Dockerfiles optimized for different package managers:
-
-- `Dockerfile` - for npm
-- `Dockerfile.pnpm` - for pnpm
-- `Dockerfile.bun` - for bun
-
-To build and run using Docker:
-
+1. **Install Amplify CLI**
 ```bash
-# For npm
-docker build -t my-app .
-
-# For pnpm
-docker build -f Dockerfile.pnpm -t my-app .
-
-# For bun
-docker build -f Dockerfile.bun -t my-app .
-
-# Run the container
-docker run -p 3000:3000 my-app
+npm install -g @aws-amplify/cli
+amplify configure
 ```
 
-The containerized application can be deployed to any platform that supports Docker, including:
-
-- AWS ECS
-- Google Cloud Run
-- Azure Container Apps
-- Digital Ocean App Platform
-- Fly.io
-- Railway
-
-### DIY Deployment
-
-If you're familiar with deploying Node applications, the built-in app server is production-ready.
-
-Make sure to deploy the output of `npm run build`
-
-```
-├── package.json
-├── package-lock.json (or pnpm-lock.yaml, or bun.lockb)
-├── build/
-│   ├── client/    # Static assets
-│   └── server/    # Server-side code
+2. **Initialize Amplify**
+```bash
+amplify init
 ```
 
-## Styling
+3. **Configure Build Settings**
+Create `amplify.yml`:
+```yaml
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - npm install
+    build:
+      commands:
+        - npm run build
+  artifacts:
+    baseDirectory: dist
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - node_modules/**/*
+```
 
-This template comes with [Tailwind CSS](https://tailwindcss.com/) already configured for a simple default starting experience. You can use whatever CSS framework you prefer.
+4. **Environment Variables**
+Configure in Amplify Console:
+- VITE_SUPABASE_URL
+- VITE_SUPABASE_ANON_KEY
+- OPENAI_API_KEY
+- OPENAI_MODEL
 
----
+5. **Deploy**
+   - Connect repository in Amplify Console
+   - Select main/master branch
+   - Review and deploy
 
-Built with ❤️ using React Router.
+6. **Domain Setup (Optional)**
+   - Add custom domain in Amplify Console
+   - Configure DNS settings
+   - Enable HTTPS
+
+## Production Considerations
+
+### Security
+- Enable RLS policies in Supabase
+- Configure proper CORS settings
+- Set up proper IAM roles
+- Enable audit logging
+
+### Performance
+- Configure caching rules
+- Enable CDN
+- Optimize asset delivery
+- Monitor API limits
+
+### Monitoring
+- Set up AWS CloudWatch
+- Configure Supabase monitoring
+- Enable error tracking
+- Monitor API usage
+
+## Troubleshooting
+
+### Common Issues
+1. **Database Connection**
+   - Verify connection strings
+   - Check RLS policies
+   - Validate permissions
+
+2. **Deployment Failures**
+   - Check build logs
+   - Verify environment variables
+   - Validate dependencies
+
+3. **Function Timeouts**
+   - Check function logs
+   - Monitor execution time
+   - Optimize operations
+
+## Contributing
+
+1. Fork the repository
+2. Create feature branch
+3. Commit changes
+4. Push to branch
+5. Create Pull Request
+
+## Support
+
+For support:
+- Open an issue
+- Check documentation
+- Contact development team

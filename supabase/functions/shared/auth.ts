@@ -1,11 +1,26 @@
+/**
+ * Authentication module for Edge Functions.
+ * @module auth
+ */
+
 import { EdgeFunctionError, ERROR_CODES } from './errors.ts';
 import { supabase as defaultSupabase } from './db.ts';
 
+/**
+ * Authentication error interface.
+ */
 export interface AuthError extends Error {
   code: string;
   details?: Record<string, any>;
 }
 
+/**
+ * Validates a user session token.
+ * @param {string} authHeader - Authorization header containing the session token
+ * @param {any} [supabaseClient=defaultSupabase] - Supabase client instance
+ * @returns {Promise<string>} User ID from the validated session
+ * @throws {EdgeFunctionError} If session is invalid or expired
+ */
 export async function validateUserSession(
   authHeader: string,
   supabaseClient = defaultSupabase
@@ -34,6 +49,14 @@ export async function validateUserSession(
   }
 }
 
+/**
+ * Validates a user's access to a grant application.
+ * @param {string} userId - User ID to validate
+ * @param {string} grantApplicationId - Grant application ID to check access for
+ * @param {any} [supabaseClient=defaultSupabase] - Supabase client instance
+ * @returns {Promise<boolean>} Whether the user has access
+ * @throws {EdgeFunctionError} If validation fails
+ */
 export async function validateUserAccess(
   userId: string,
   grantApplicationId: string,
