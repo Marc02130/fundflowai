@@ -10,13 +10,14 @@ import { EdgeFunctionError, ERROR_CODES } from './errors.ts';
 const openai = new OpenAI({
   apiKey: Deno.env.get('OPENAI_API_KEY'),
   timeout: 120000, // 2 minute timeout
-  maxRetries: 3
+  maxRetries: 2,
+  maxTokens: 4000
 });
 
 /**
  * Generates text using OpenAI's GPT model.
  * @param {string} prompt - The input prompt for text generation
- * @param {string} [model='gpt-4'] - The OpenAI model to use
+ * @param {string} content - Previous content for context
  * @param {number} [maxTokens=2000] - Maximum tokens in the response
  * @param {number} [temperature=0.7] - Randomness of the output (0-1)
  * @returns {Promise<string>} Generated text
@@ -24,13 +25,14 @@ const openai = new OpenAI({
  */
 export async function generateText(
   prompt: string,
-  model: string = 'gpt-4',
-  maxTokens: number = 2000,
+  content: string | null = '',
   temperature: number = 0.7
 ): Promise<string> {
   try {
     console.log('=== Generating Text with OpenAI ===');
     console.log('Prompt:', prompt);
+    
+    const model = Deno.env.get('OPENAI_MODEL') || 'gpt-4';
     console.log('Model:', model);
     
     const completion = await openai.chat.completions.create({
@@ -45,10 +47,13 @@ export async function generateText(
           content: prompt
         }
       ],
-      max_tokens: maxTokens,
+      max_completion_tokens: openai.maxTokens,
       temperature: temperature,
     });
 
+    console.log('=== Complete OpenAI Response ===');
+    console.log(JSON.stringify(completion, null, 2));
+    
     const generatedText = completion.choices[0]?.message?.content;
     if (!generatedText) {
       throw new EdgeFunctionError(ERROR_CODES.AI_ERROR, 'No text was generated');
@@ -71,7 +76,6 @@ export async function generateText(
  * @param {string} originalText - The text to be refined
  * @param {string} stage - The refinement stage (e.g., 'spelling', 'logic')
  * @param {string} prompt - Instructions for refinement
- * @param {string} [model='gpt-4'] - The OpenAI model to use
  * @returns {Promise<string>} Refined text
  * @throws {EdgeFunctionError} If text refinement fails
  */
@@ -79,13 +83,15 @@ export async function refineText(
   originalText: string,
   stage: string,
   prompt: string,
-  model: string = 'gpt-4'
 ): Promise<string> {
   try {
     console.log(`=== Refining Text (${stage}) ===`);
     console.log('Original Text Length:', originalText.length);
     console.log('Refinement Prompt:', prompt);
     
+    const model = Deno.env.get('OPENAI_MODEL') || 'gpt-4';
+    console.log('Model:', model);
+
     const completion = await openai.chat.completions.create({
       model: model,
       messages: [
@@ -98,7 +104,7 @@ export async function refineText(
           content: `Original Text:\n${originalText}\n\nRefinement Instructions:\n${prompt}`
         }
       ],
-      max_tokens: Math.ceil(Math.max(originalText.length * 1.2, 2000)), // Ensure integer value
+      max_completion_tokens: Math.max(Math.ceil(originalText.length * 1.2), openai.maxTokens), // Ensure integer value
       temperature: 0.3, // Lower temperature for more focused refinements
     });
 

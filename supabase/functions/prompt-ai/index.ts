@@ -62,7 +62,7 @@ async function getSectionData(sectionId: string) {
   console.log('Section ID:', sectionId);
   
   try {
-    // 1. Get the fucking base section
+    // 1. Get the  base section
     const { data: sectionData, error: sectionError } = await supabase
       .from('grant_application_section')
       .select('*')
@@ -72,7 +72,7 @@ async function getSectionData(sectionId: string) {
     if (sectionError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get section: ${sectionError.message}`);
     if (!sectionData) throw new EdgeFunctionError(ERROR_CODES.NOT_FOUND, 'Section not found');
     
-    // 2. Get the fucking grant section
+    // 2. Get the  grant section
     const { data: grantSection, error: grantSectionError } = await supabase
       .from('grant_sections')
       .select('*')
@@ -81,7 +81,7 @@ async function getSectionData(sectionId: string) {
       
     if (grantSectionError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get grant section: ${grantSectionError.message}`);
     
-    // 3. Get the fucking application
+    // 3. Get the  application
     const { data: application, error: applicationError } = await supabase
       .from('grant_applications')
       .select('*')
@@ -90,7 +90,7 @@ async function getSectionData(sectionId: string) {
       
     if (applicationError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get application: ${applicationError.message}`);
     
-    // 4. Get the fucking grant opportunity
+    // 4. Get the  grant opportunity
     const { data: opportunity, error: opportunityError } = await supabase
       .from('grant_opportunities')
       .select('*')
@@ -99,7 +99,7 @@ async function getSectionData(sectionId: string) {
       
     if (opportunityError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get opportunity: ${opportunityError.message}`);
     
-    // 5. Get the fucking requirements
+    // 5. Get the  requirements
     const { data: requirements, error: requirementsError } = await supabase
       .from('grant_requirements')
       .select('*')
@@ -245,8 +245,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    console.log("=== Starting handler execution ===");
-    
     // Validate request method
     if (req.method !== 'POST') {
       throw new EdgeFunctionError(ERROR_CODES.INVALID_INPUT, 'Only POST method is allowed', undefined, 405);
@@ -266,36 +264,21 @@ Deno.serve(async (req) => {
       throw new EdgeFunctionError(ERROR_CODES.INVALID_INPUT, 'Invalid JSON in request body');
     }
 
-    const { section_id, field_id, prompt_id } = body;
-    console.log("Request body:", { section_id, field_id, prompt_id });
+    const { section_id, field_id, prompt_id } = body;;
 
     if (!section_id || !field_id) {
       throw new EdgeFunctionError(ERROR_CODES.INVALID_INPUT, 'section_id and field_id are required');
     }
 
     // Validate user session
-    console.log("=== User Validation ===");
-    console.log("Auth Header:", authHeader);
     const userId = await validateUserSession(authHeader);
-    console.log("User ID from session:", userId);
 
     // Get section and field data
-    console.log("=== Getting Data ===");
-    console.log("Getting section and field data...");
     const [section, field] = await Promise.all([
       getSectionData(section_id),
       getFieldData(field_id)
     ]);
-    console.log("Section data:", section);
-    console.log("Field data:", field);
 
-    // Validate user access
-    console.log("=== Access Check ===");
-    console.log("Raw auth header:", authHeader);
-    console.log("User ID from JWT:", userId);
-    console.log("Section data:", JSON.stringify(section, null, 2));
-    console.log("Application ID:", section.grant_application.id);
-    
     try {
       // Check access directly in the database using user_id (links to auth.users)
       const { data: accessData, error: accessError } = await supabase
@@ -311,20 +294,15 @@ Deno.serve(async (req) => {
       }
 
       const hasAccess = !!accessData;
-      console.log("Direct DB access check result:", hasAccess);
       
       if (!hasAccess) {
-        console.error("Access denied for user", userId, "to application", section.grant_application.id);
         throw new EdgeFunctionError(ERROR_CODES.AUTH_ERROR, 'User does not have access to this application');
       }
-      console.log("Access check passed");
     } catch (err) {
-      console.error("Error during access check:", err);
       throw new EdgeFunctionError(ERROR_CODES.AUTH_ERROR, 'Failed to validate user access');
     }
 
     // Get prompt text
-    console.log("Getting prompt...");
     let promptText = section.grant_section?.ai_generator_prompt;
     if (prompt_id) {
       const userPrompt = await getUserPrompt(prompt_id);
@@ -332,23 +310,84 @@ Deno.serve(async (req) => {
     }
 
     // Get attachments and context
-    console.log("Getting attachments and context...");
     const attachments = await getSectionAttachments(section_id);
 
+    // Get attachment contents
+    const attachmentContents = await Promise.all(
+      attachments.map(async (a) => {
+        const { data, error } = await supabase
+          .storage
+          .from('grant-documents')
+          .download(a.file_path);
+        
+        if (error) {
+          console.error(`Failed to download attachment ${a.file_name}:`, error);
+          return `[Failed to load ${a.file_name}]`;
+        }
+
+        try {
+          switch(a.file_type) {
+            case 'pdf':
+            case 'doc':
+            case 'docx':
+            case 'xls':
+            case 'xlsx':
+            case 'ppt':
+            case 'pptx':
+            case 'txt':
+            case 'json':
+            case 'xml':
+            case 'csv':
+              const textContent = await data.text();
+              return truncateText(textContent);
+            
+            case 'png':
+            case 'jpg':
+            case 'jpeg':
+            case 'tif':
+            case 'tiff':
+            case 'svg':
+              return `[Image file: ${a.file_name}]\n` +
+                     `File size: ${data.size} bytes`;
+            
+            default:
+              return `[Unsupported file type: ${a.file_type}]`;
+          }
+        } catch (e) {
+          console.error(`Failed to process ${a.file_name}:`, e);
+          return `[Failed to process ${a.file_name}: ${e.message}]`;
+        }
+      })
+    );
+
+    function truncateText(text: string, maxLength: number = 4000): string {
+      if (text.length <= maxLength) return text;
+      const halfLength = Math.floor(maxLength / 2);
+      return text.substring(0, halfLength) + 
+             "\n...[content truncated]...\n" + 
+             text.substring(text.length - halfLength);
+    }
+
     // Stage 1: Initial Generation
-    console.log("Stage 1: Initial Generation...");
+    console.log("\n=== STAGE 1: INITIAL GENERATION - START ===");
+    console.log("Prompt Text:", promptText);
+    console.log("Field Data:", field);
+    console.log("Attachments:", attachments);
+
     const aiRequest = {
       prompt: promptText,
-      attachments: attachments.map(a => ({
+      attachments: attachments.map((a, i) => ({
         name: a.file_name,
         type: a.file_type,
-        path: a.file_path
+        content: attachmentContents[i]
       })),
       context: {
         instructions: field.user_instructions,
-        comments: field.user_comments_on_ai_output
+        comments: field.user_comments_on_ai_output,
+        content: field.ai_output
       }
     };
+    console.log("AI Request:", aiRequest);
     
     // Format the prompt properly
     const formattedPrompt = `
@@ -356,35 +395,50 @@ Instructions: ${aiRequest.context.instructions || 'No specific instructions prov
 
 Previous Comments: ${aiRequest.context.comments || 'No previous comments'}
 
-Attachments:
-${aiRequest.attachments.map(a => `- ${a.name} (${a.type}): ${a.path}`).join('\n')}
+Previous Content: ${aiRequest.context.content || 'No previous content'}
+
+Reference Materials:
+${aiRequest.attachments.map(a => `=== ${a.name} ===\n${a.content}\n`).join('\n')}
 
 Prompt:
 ${aiRequest.prompt}
 `;
+    console.log("Formatted Prompt:", formattedPrompt);
     
     let generatedText = await generateText(
       formattedPrompt,
-      'gpt-4',
-      2000,
+      null,
       0.7
     );
+    console.log("=== STAGE 1: INITIAL GENERATION - COMPLETE ===");
+    console.log("Generated Text:", generatedText);
     await updateField(field_id, generatedText, 'initial');
     
     // Stage 2: Spelling and Grammar Check
-    console.log("Stage 2: Spelling and Grammar Check...");
+    console.log("\n=== STAGE 2: SPELLING CHECK - START ===");
+    console.log("Input Text for Spelling Check:", generatedText);
     const spellingPrompt = `Act as a proofreading expert tasked with correcting grammatical, spelling and punctuation errors in the given text. Identify any mistakes, and make necessary corrections to ensure clarity, accuracy, enhance readability and flow. Text: ${generatedText}`;
+    console.log("Spelling Prompt:", spellingPrompt);
+    
     generatedText = await refineText(generatedText, 'spelling', spellingPrompt);
+    console.log("=== STAGE 2: SPELLING CHECK - COMPLETE ===");
+    console.log("Text After Spelling Check:", generatedText);
     await updateField(field_id, generatedText, 'spelling');
     
     // Stage 3: Logic Check
-    console.log("Stage 3: Logic Check...");
+    console.log("\n=== STAGE 3: LOGIC CHECK - START ===");
+    console.log("Input Text for Logic Check:", generatedText);
     const logicPrompt = `Review the following text for logical errors, contradictions, and inconsistencies. Identify any issues and provide corrected versions while maintaining the original meaning and intent of the text: ${generatedText}`;
+    console.log("Logic Prompt:", logicPrompt);
+    
     generatedText = await refineText(generatedText, 'logic', logicPrompt);
+    console.log("=== STAGE 3: LOGIC CHECK - COMPLETE ===");
+    console.log("Text After Logic Check:", generatedText);
     await updateField(field_id, generatedText, 'logic');
     
     // Stage 4: Requirements Check
-    console.log("Stage 4: Requirements Check...");
+    console.log("\n=== STAGE 4: REQUIREMENTS CHECK - START ===");
+    console.log("Input Text for Requirements Check:", generatedText);
     const requirementsPrompt = `Review the following text for compliance with grant requirements:
 
 Content to Review:
@@ -392,8 +446,12 @@ ${generatedText}
 
 Requirements to Check Against:
 ${section.grant_application?.grant_opportunity?.requirements?.map(req => `- ${req.requirement_text}`).join('\n') || 'No specific requirements provided'}`;
+    console.log("Requirements Prompt:", requirementsPrompt);
+    console.log("Requirements:", section.grant_application?.grant_opportunity?.requirements);
     
     generatedText = await refineText(generatedText, 'requirements', requirementsPrompt);
+    console.log("=== STAGE 4: REQUIREMENTS CHECK - COMPLETE ===");
+    console.log("Text After Requirements Check:", generatedText);
     await updateField(field_id, generatedText, 'requirements');
 
     console.log("=== Handler execution completed successfully ===");
