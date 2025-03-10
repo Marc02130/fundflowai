@@ -8,9 +8,19 @@ interface RichTextEditorProps {
 }
 
 export default function RichTextEditor({ content, onChange }: RichTextEditorProps) {
+  // Convert \n to proper HTML paragraphs
+  const formatContent = (text: string) => {
+    if (!text) return '';
+    // Split by newlines and wrap in paragraphs, preserving existing HTML
+    if (!text.includes('<')) {
+      return text.split('\n').map(line => `<p>${line}</p>`).join('');
+    }
+    return text;
+  };
+
   const editor = useEditor({
     extensions: [StarterKit],
-    content,
+    content: formatContent(content),
     editorProps: {
       attributes: {
         class: 'prose prose-sm sm:prose lg:prose-lg xl:prose-2xl mx-auto focus:outline-none'
@@ -19,11 +29,11 @@ export default function RichTextEditor({ content, onChange }: RichTextEditorProp
     onUpdate: ({ editor }) => {
       onChange(editor.getHTML());
     }
-  }, [content]);
+  });
 
   useEffect(() => {
-    if (editor && editor.getHTML() !== content) {
-      editor.commands.setContent(content);
+    if (editor && editor.getHTML() !== formatContent(content)) {
+      editor.commands.setContent(formatContent(content));
     }
   }, [content, editor]);
 

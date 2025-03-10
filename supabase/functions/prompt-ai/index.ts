@@ -90,22 +90,36 @@ async function getSectionData(sectionId: string) {
       
     if (applicationError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get application: ${applicationError.message}`);
     
-    // 4. Get the  grant opportunity
+    // 4. Get the  grant opportunity with grant details
     const { data: opportunity, error: opportunityError } = await supabase
       .from('grant_opportunities')
-      .select('*')
+      .select(`
+        *,
+        grant:grants (
+          id,
+          organization_id
+        )
+      `)
       .eq('id', application.grant_opportunity_id)
       .single();
       
     if (opportunityError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get opportunity: ${opportunityError.message}`);
     
-    // 5. Get the  requirements
-    const { data: requirements, error: requirementsError } = await supabase
+    // 5. Get the grant requirements
+    const { data: grant_requirements, error: requirementsError } = await supabase
       .from('grant_requirements')
       .select('*')
       .eq('grant_id', opportunity.grant_id);
       
     if (requirementsError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get requirements: ${requirementsError.message}`);
+
+    // 6. Get the organization requirements
+    const { data: org_grant_requirements, error: orgRequirementsError } = await supabase
+      .from('organization_grant_requirements')
+      .select('*')
+      .eq('organization_id', opportunity.grant.organization_id);
+      
+    if (orgRequirementsError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get organization requirements: ${orgRequirementsError.message}`);
 
     // Put this shit together
     const result = {
@@ -115,7 +129,9 @@ async function getSectionData(sectionId: string) {
         ...application,
         grant_opportunity: {
           ...opportunity,
-          requirements: requirements
+          grant: opportunity.grant,
+          requirements: grant_requirements,
+          org_requirements: org_grant_requirements
         }
       }
     };
@@ -407,7 +423,6 @@ ${aiRequest.prompt}
     
     let generatedText = await generateText(
       formattedPrompt,
-      null,
       0.7
     );
     console.log("=== STAGE 1: INITIAL GENERATION - COMPLETE ===");
@@ -415,39 +430,32 @@ ${aiRequest.prompt}
     await updateField(field_id, generatedText, 'initial');
     
     // Stage 2: Spelling and Grammar Check
-    console.log("\n=== STAGE 2: SPELLING CHECK - START ===");
-    console.log("Input Text for Spelling Check:", generatedText);
-    const spellingPrompt = `Act as a proofreading expert tasked with correcting grammatical, spelling and punctuation errors in the given text. Identify any mistakes, and make necessary corrections to ensure clarity, accuracy, enhance readability and flow. Text: ${generatedText}`;
+    console.log("\n=== STAGE 2: SPELLING & LOGIC CHECK - START ===");
+    console.log("Input Text for Spelling and Logic Check:", generatedText);
+    const spellingPrompt = `Act as a proofreading expert. Correct grammatical, spelling and punctuation errors in the given text. Check the text for logical errors, contradictions, and inconsistencies. Identify any mistakes, and make necessary corrections to ensure clarity, accuracy, enhance readability and flow. If no changes are needed, return the original text. Text: ${generatedText}`;
     console.log("Spelling Prompt:", spellingPrompt);
     
-    generatedText = await refineText(generatedText, 'spelling', spellingPrompt);
-    console.log("=== STAGE 2: SPELLING CHECK - COMPLETE ===");
-    console.log("Text After Spelling Check:", generatedText);
-    await updateField(field_id, generatedText, 'spelling');
+    generatedText = await refineText(generatedText, 'spelling and logic', spellingPrompt);
+    console.log("=== STAGE 2: SPELLING & LOGIC CHECK - COMPLETE ===");
+    console.log("Text After Spelling and Logic Check:", generatedText);
+    await updateField(field_id, generatedText, 'spelling and logic');
     
-    // Stage 3: Logic Check
-    console.log("\n=== STAGE 3: LOGIC CHECK - START ===");
-    console.log("Input Text for Logic Check:", generatedText);
-    const logicPrompt = `Review the following text for logical errors, contradictions, and inconsistencies. Identify any issues and provide corrected versions while maintaining the original meaning and intent of the text: ${generatedText}`;
-    console.log("Logic Prompt:", logicPrompt);
-    
-    generatedText = await refineText(generatedText, 'logic', logicPrompt);
-    console.log("=== STAGE 3: LOGIC CHECK - COMPLETE ===");
-    console.log("Text After Logic Check:", generatedText);
-    await updateField(field_id, generatedText, 'logic');
-    
-    // Stage 4: Requirements Check
-    console.log("\n=== STAGE 4: REQUIREMENTS CHECK - START ===");
+    // Stage 3: Requirements Check
+    console.log("\n=== STAGE 3: REQUIREMENTS CHECK - START ===");
     console.log("Input Text for Requirements Check:", generatedText);
-    const requirementsPrompt = `Review the following text for compliance with grant requirements:
+    const requirementsPrompt = `Review the following text for compliance with grant requirements. If no changes are needed, return the complete original text. Make any necessary corrections while maintaining the original meaning and intent.
 
 Content to Review:
 ${generatedText}
 
-Requirements to Check Against:
-${section.grant_application?.grant_opportunity?.requirements?.map(req => `- ${req.requirement_text}`).join('\n') || 'No specific requirements provided'}`;
+Grant Requirements:
+${section.grant_application?.grant_opportunity?.requirements?.map(req => `- ${req.requirement}: ${req.url}`).join('\n') || 'No grant-specific requirements provided'}
+
+Organization Requirements:
+${section.grant_application?.grant_opportunity?.org_requirements?.map(req => `- ${req.requirement}: ${req.url}`).join('\n') || 'No organization-specific requirements provided'}`;
     console.log("Requirements Prompt:", requirementsPrompt);
-    console.log("Requirements:", section.grant_application?.grant_opportunity?.requirements);
+    console.log("Grant Requirements:", section.grant_application?.grant_opportunity?.requirements);
+    console.log("Organization Requirements:", section.grant_application?.grant_opportunity?.org_requirements);
     
     generatedText = await refineText(generatedText, 'requirements', requirementsPrompt);
     console.log("=== STAGE 4: REQUIREMENTS CHECK - COMPLETE ===");

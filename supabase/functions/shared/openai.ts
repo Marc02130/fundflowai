@@ -25,7 +25,6 @@ const openai = new OpenAI({
  */
 export async function generateText(
   prompt: string,
-  content: string | null = '',
   temperature: number = 0.7
 ): Promise<string> {
   try {
@@ -97,7 +96,7 @@ export async function refineText(
       messages: [
         {
           role: 'system',
-          content: `You are an expert at ${stage} refinement. Your task is to improve the provided text according to the refinement prompt while maintaining the original meaning and intent.`
+          content: `You are an expert at ${stage} refinement. Your task is to improve the provided text according to the refinement prompt while maintaining the original meaning and intent. If no changes are needed, return the original text.`
         },
         {
           role: 'user',
@@ -108,6 +107,9 @@ export async function refineText(
       temperature: 0.3, // Lower temperature for more focused refinements
     });
 
+    console.log('=== Complete OpenAI Refine (${stage}) TextResponse ===');
+    console.log(JSON.stringify(completion, null, 2));
+    
     const refinedText = completion.choices[0]?.message?.content;
     if (!refinedText) {
       throw new EdgeFunctionError(ERROR_CODES.AI_ERROR, 'No refined text was generated');
