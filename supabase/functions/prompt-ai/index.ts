@@ -432,7 +432,7 @@ ${aiRequest.prompt}
     // Stage 2: Spelling and Grammar Check
     console.log("\n=== STAGE 2: SPELLING & LOGIC CHECK - START ===");
     console.log("Input Text for Spelling and Logic Check:", generatedText);
-    const spellingPrompt = `Act as a proofreading expert. Correct grammatical, spelling and punctuation errors in the given text. Check the text for logical errors, contradictions, and inconsistencies. Identify any mistakes, and make necessary corrections to ensure clarity, accuracy, enhance readability and flow. If no changes are needed, return the original text. Text: ${generatedText}`;
+    const spellingPrompt = `Act as a proofreading expert. Correct grammatical, spelling and punctuation errors in the given text. Identify any mistakes, and make necessary corrections to ensure clarity, accuracy, enhance readability and flow. If no changes are needed, return the original text. Text: ${generatedText}`;
     console.log("Spelling Prompt:", spellingPrompt);
     
     generatedText = await refineText(generatedText, 'spelling and logic', spellingPrompt);
@@ -440,7 +440,18 @@ ${aiRequest.prompt}
     console.log("Text After Spelling and Logic Check:", generatedText);
     await updateField(field_id, generatedText, 'spelling and logic');
     
-    // Stage 3: Requirements Check
+    // Stage 3: Logic Check
+    console.log("\n=== STAGE 3: LOGIC CHECK - START ===");
+    console.log("Input Text for Logic Check:", generatedText);
+    const logicPrompt = `Review the following text for logical errors, contradictions, and inconsistencies. If no changes are needed, return the original text. Identify any issues and provide corrected versions while maintaining the original meaning and intent of the text: ${generatedText}`;
+    console.log("Logic Prompt:", logicPrompt);
+    
+    generatedText = await refineText(generatedText, 'logic', logicPrompt);
+    console.log("=== STAGE 3: LOGIC CHECK - COMPLETE ===");
+    console.log("Text After Logic Check:", generatedText);
+    await updateField(field_id, generatedText, 'logic');
+    
+    // Stage 4: Requirements Check
     console.log("\n=== STAGE 3: REQUIREMENTS CHECK - START ===");
     console.log("Input Text for Requirements Check:", generatedText);
     const requirementsPrompt = `Review the following text for compliance with grant requirements. If no changes are needed, return the complete original text. Make any necessary corrections while maintaining the original meaning and intent.

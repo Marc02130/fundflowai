@@ -96,7 +96,7 @@ export async function refineText(
       messages: [
         {
           role: 'system',
-          content: `You are an expert at ${stage} refinement. Your task is to improve the provided text according to the refinement prompt while maintaining the original meaning and intent. If no changes are needed, return the original text.`
+          content: `You are an expert at ${stage} refinement. Your task is to improve the provided text according to the refinement prompt while maintaining the original meaning and intent. If no changes are needed, return the original text. Do explain lack of changes on the text, just return the text.`
         },
         {
           role: 'user',
