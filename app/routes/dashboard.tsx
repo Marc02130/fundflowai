@@ -174,7 +174,7 @@ export default function Dashboard() {
     <div className="min-h-screen flex">
       {/* Left navigation sidebar with collapse functionality */}
       <div className={`${navCollapsed ? 'w-12' : 'w-64'} border-r border-gray-200 min-h-screen transition-all duration-300 relative`}>
-        <div className="py-8 pb-2 px-6 border-b border-gray-200 relative">
+        <div className="py-8 pb-1 px-6 border-b border-gray-200 relative">
           <button 
             onClick={() => setNavCollapsed(!navCollapsed)} 
             className="absolute top-2 right-2 p-1 rounded-md hover:bg-gray-100 transition-colors text-sm"
@@ -189,12 +189,12 @@ export default function Dashboard() {
           )}
         </div>
         
-        <nav className="py-8">
-          <ul className="flex flex-col gap-2">
-            <li className="mb-2">
+        <nav>
+          <ul className="flex flex-col gap-1">
+            <li className="mb-1">
               <Link 
                 to="/dashboard" 
-                className={`flex items-center px-4 py-3 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard') ? 'bg-gray-200 font-semibold' : ''}`}
+                className={`flex items-center px-4 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard') ? 'bg-gray-200 font-semibold' : ''}`}
                 title="Home"
               >
                 <span className="text-xl shrink-0">⌂</span>
@@ -204,17 +204,17 @@ export default function Dashboard() {
 
             {/* Applications Section */}
             {!navCollapsed && (
-              <li className="mb-2 mt-6">
-                <div className="px-4 py-3 text-xl">
+              <li className="mt-6">
+                <div className="px-4 text-xl">
                   Applications
                 </div>
               </li>
             )}
             
-            <li className="mb-2 pl-4">
+            <li className="mb-1 pl-4">
               <Link 
                 to="/dashboard/new" 
-                className={`flex items-center px-4 py-3 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/new') ? 'bg-gray-200 font-semibold' : ''}`}
+                className={`flex items-center px-4 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/new') ? 'bg-gray-200 font-semibold' : ''}`}
                 title="New Application"
               >
                 <span className="text-xl shrink-0">+</span>
@@ -223,9 +223,9 @@ export default function Dashboard() {
             </li>
 
             {/* Unsubmitted Applications - pure accordion */}
-            <li className="mb-2 pl-4">
+            <li className="pl-4">
               <div 
-                className={`flex items-start px-4 py-3 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors cursor-pointer ${inProgressApplications.length > 0 ? 'bg-gray-100' : ''}`}
+                className={`flex items-start px-4 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors cursor-pointer ${inProgressApplications.length > 0 ? 'bg-gray-100' : ''}`}
                 onClick={() => setIsUnsubmittedExpanded(!isUnsubmittedExpanded)}
                 title="Unsubmitted Applications"
               >
@@ -246,7 +246,7 @@ export default function Dashboard() {
               {isUnsubmittedExpanded && (
                 <ul className={`mt-2 flex flex-col gap-2 ${navCollapsed ? 'pl-3' : 'pl-8'}`}>
                   {isLoading ? (
-                    <li className="px-3 py-2 text-xl text-gray-500">
+                    <li className="px-3 text-xl text-gray-500">
                       {!navCollapsed && (
                         <div className="flex items-center">
                           <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24">
@@ -263,7 +263,7 @@ export default function Dashboard() {
                         <li key={app.id} className="mb-2">
                           <Link 
                             to={`/dashboard/applications/${app.id}`}
-                            className="block px-3 py-2 rounded-md hover:bg-gray-100 transition-colors text-gray-900 text-xl"
+                            className="block px-3 rounded-md hover:bg-gray-100 transition-colors text-gray-900 text-xl"
                           >
                             {app.title}
                           </Link>
@@ -271,7 +271,7 @@ export default function Dashboard() {
                       ))}
                     </>
                   ) : (
-                    <li className="px-3 py-2 text-xl text-gray-500">
+                    <li className="px-3 text-xl text-gray-500">
                       {!navCollapsed && "No applications"}
                     </li>
                   )}
@@ -279,10 +279,10 @@ export default function Dashboard() {
               )}
             </li>
 
-            <li className="mb-2 pl-4">
+            <li className="mb-1 pl-4">
               <Link 
                 to="/dashboard/applications" 
-                className={`flex items-start px-4 py-3 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/applications') ? 'bg-gray-200 font-semibold' : ''}`}
+                className={`flex items-start px-4 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/applications') ? 'bg-gray-200 font-semibold' : ''}`}
                 title="All"
               >
                 <span className="text-xl shrink-0">●</span>
@@ -291,10 +291,10 @@ export default function Dashboard() {
             </li>
 
             {/* Profile navigation item */}
-            <li className="mb-2 mt-6">
+            <li className="mb-1 mt-6">
               <Link 
                 to="/dashboard/profile" 
-                className={`flex items-center px-4 py-3 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/profile') ? 'bg-gray-200 font-semibold' : ''}`}
+                className={`flex items-center px-4 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors ${isActiveRoute('/dashboard/profile') ? 'bg-gray-200 font-semibold' : ''}`}
                 title="Profile"
               >
                 <span className="text-xl shrink-0">◆</span>
@@ -310,7 +310,7 @@ export default function Dashboard() {
                   signOut();
                   navigate('/');
                 }}
-                className="flex items-center px-4 py-3 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors"
+                className="flex items-center px-4 py-1 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors"
                 title="Sign out"
               >
                 <span className="text-xl shrink-0">⤴</span>

@@ -226,7 +226,7 @@ export default function GrantTypeBasicInfoStep({
             setSelectedType(e.target.value);
             saveFormState({ grantTypeId: e.target.value });
           }}
-          className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
+          className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-2 border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"
           required
         >
           <option value="">Select a grant type</option>
@@ -262,7 +262,7 @@ export default function GrantTypeBasicInfoStep({
               setAmountRequested(value);
               saveFormState({ amount_requested: value });
             }}
-            className="mt-1 block w-full pl-7 pr-12 border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+            className="mt-1 block w-full pl-7 pr-12 border-2 border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
             placeholder="0.00"
             step="0.01"
             min="0"
@@ -286,16 +286,14 @@ export default function GrantTypeBasicInfoStep({
             setTitle(e.target.value);
             saveFormState({ title: e.target.value });
           }}
-          className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+          className="mt-1 block w-full border-2 border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
           required
         />
-        <p className="mt-2 text-sm text-gray-500">
-          This title will be displayed in your unsubmitted applications list
-        </p>
       </div>
 
       {/* Description */}
       <div>
+        <p className="text-sm pb-2 text-gray-900">To facilitate the generation of a high-quality first draft of your application, please provide a detailed description. First, this description, along with any grant writer attachments, will be used to generate in-depth research. Then, this in-depth research, combined with the original description and attachments, will be used to create the first draft of the application. Therefore, provide sufficient detail in your description and attachments.</p>
         <label htmlFor="description" className="block text-sm font-medium text-gray-700">
           Description
         </label>
@@ -307,7 +305,7 @@ export default function GrantTypeBasicInfoStep({
             saveFormState({ description: e.target.value });
           }}
           rows={6}
-          className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+          className="mt-1 block w-full border-2 border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
           required
         />
       </div>

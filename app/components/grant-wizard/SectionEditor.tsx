@@ -258,16 +258,31 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
       if (uploadError) throw uploadError;
 
       // Create document record
-      const { error: documentError } = await supabase
+      const { data: docData, error: documentError } = await supabase
         .from('grant_application_section_documents')
         .insert({
           grant_application_section_id: sectionId,
           file_name: file.name,
           file_type: fileExt?.toLowerCase() || 'other',
-          file_path: filePath
-        });
+          file_path: filePath,
+          vectorization_status: 'pending'
+        })
+        .select()
+        .single();
 
       if (documentError) throw documentError;
+      if (!docData) throw new Error('No document data returned');
+
+      // Add to processing queue
+      const { error: queueError } = await supabase
+        .from('document_processing_queue')
+        .insert({
+          document_id: docData.id,
+          document_type: 'section',
+          status: 'pending'
+        });
+
+      if (queueError) throw queueError;
 
       // Refresh documents list
       const { data: documentData, error: fetchError } = await supabase
@@ -315,20 +330,37 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
 
   const handleDeleteAttachment = async (doc: SectionDocument) => {
     try {
-      // Delete from Supabase Storage
-      const { error: deleteError } = await supabase.storage
-        .from('grant-attachments')
-        .remove([doc.file_path]);
+      // 1. Delete vectors first
+      const { error: vectorError } = await supabase
+        .from('grant_application_section_document_vectors')
+        .delete()
+        .eq('document_id', doc.id);
 
-      if (deleteError) throw deleteError;
+      if (vectorError) throw vectorError;
 
-      // Delete from database
+      // 2. Delete from queue
+      const { error: queueError } = await supabase
+        .from('document_processing_queue')
+        .delete()
+        .eq('document_id', doc.id)
+        .eq('document_type', 'section');
+
+      if (queueError) throw queueError;
+
+      // 3. Delete document record
       const { error: dbError } = await supabase
         .from('grant_application_section_documents')
         .delete()
         .eq('id', doc.id);
 
       if (dbError) throw dbError;
+
+      // 4. Finally delete from storage
+      const { error: deleteError } = await supabase.storage
+        .from('grant-attachments')
+        .remove([doc.file_path]);
+
+      if (deleteError) throw deleteError;
 
       // Update local state
       setDocuments(prev => prev.filter(d => d.id !== doc.id));

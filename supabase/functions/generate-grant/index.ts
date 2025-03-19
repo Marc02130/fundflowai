@@ -23,7 +23,7 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Max-Age': '86400',
+  'Content-Type': 'application/json',
 };
 
 /**
@@ -53,15 +53,23 @@ async function createField(sectionId: string) {
  * @param {string} fieldId - ID of the field to update
  * @param {string} aiOutput - Generated content
  * @param {string} stage - Processing stage identifier
+ * @param {string} userInstructions - User instructions/context for the field
  * @param {boolean} [failed=false] - Whether generation failed
  * @throws {EdgeFunctionError} If update fails
  */
-async function updateField(fieldId: string, aiOutput: string, stage: string, failed: boolean = false) {
+async function updateField(
+  fieldId: string, 
+  aiOutput: string, 
+  stage: string, 
+  userInstructions: string,
+  failed: boolean = false
+) {
   const { error } = await supabase
     .from('grant_application_section_fields')
     .update({
       ai_output: aiOutput,
       ai_model: failed ? 'failed' : `${Deno.env.get('OPENAI_MODEL')}-${stage}`,
+      user_instructions: userInstructions,
       updated_at: new Date().toISOString()
     })
     .eq('id', fieldId);
@@ -123,13 +131,45 @@ async function getApplicationData(applicationId: string) {
 
     if (sectionDetailsError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get section details: ${sectionDetailsError.message}`);
 
-    // Get documents
+    // Get documents and their vectors
     const { data: documents, error: documentsError } = await supabase
       .from('grant_application_documents')
-      .select('*')
+      .select('id, file_name, file_type')
       .eq('grant_application_id', applicationId);
 
     if (documentsError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get documents: ${documentsError.message}`);
+
+    // Get document vectors if documents exist
+    let documentVectors = [];
+    if (documents?.length) {
+      const { data: vectors, error: vectorsError } = await supabase
+        .from('grant_application_document_vectors')
+        .select('document_id, chunk_text')
+        .in('document_id', documents.map(d => d.id));
+
+      if (vectorsError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get document vectors: ${vectorsError.message}`);
+      documentVectors = vectors || [];
+    }
+
+    // Get section documents and their vectors
+    const { data: sectionDocs, error: sectionDocsError } = await supabase
+      .from('grant_application_section_documents')
+      .select('id, file_name, file_type, grant_application_section_id')
+      .in('grant_application_section_id', sections.map(s => s.id));
+
+    if (sectionDocsError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get section documents: ${sectionDocsError.message}`);
+
+    // Get section document vectors if documents exist
+    let sectionDocVectors = [];
+    if (sectionDocs?.length) {
+      const { data: vectors, error: vectorsError } = await supabase
+        .from('grant_application_section_document_vectors')
+        .select('document_id, chunk_text')
+        .in('document_id', sectionDocs.map(d => d.id));
+
+      if (vectorsError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get section document vectors: ${vectorsError.message}`);
+      sectionDocVectors = vectors || [];
+    }
 
     // Combine the data
     return {
@@ -140,9 +180,14 @@ async function getApplicationData(applicationId: string) {
       },
       sections: sections.map(section => ({
         ...section,
-        grant_section: sectionDetails?.find(sd => sd.id === section.grant_section_id)
+        grant_section: sectionDetails?.find(sd => sd.id === section.grant_section_id),
+        documents: sectionDocs?.filter(d => d.grant_application_section_id === section.id) || [],
+        document_vectors: sectionDocVectors.filter(v => 
+          sectionDocs?.some(d => d.id === v.document_id && d.grant_application_section_id === section.id)
+        )
       })),
-      documents: documents || []
+      documents: documents || [],
+      document_vectors: documentVectors
     };
 
   } catch (err) {
@@ -164,7 +209,7 @@ async function processSection(section: any, application: any, retryCount: number
     // Create field
     const field = await createField(section.id);
 
-    // Format prompt with application context and attachments
+    // Format prompt with application context and document chunks
     const formattedPrompt = `
 Section Requirements:
 ${application.grant_opportunity.requirements?.map((req: any) => `- ${req.requirement_text}`).join('\n') || 'No specific requirements'}
@@ -172,8 +217,11 @@ ${application.grant_opportunity.requirements?.map((req: any) => `- ${req.require
 Application Context:
 ${application.description || 'No application description provided'}
 
-Attachments:
-${application.documents.map((doc: any) => `- ${doc.file_name} (${doc.file_type}): ${doc.file_path}`).join('\n')}
+Relevant Document Content:
+${application.document_vectors.map((v: any) => v.chunk_text).join('\n\n')}
+
+Section-Specific Documents:
+${section.document_vectors.map((v: any) => v.chunk_text).join('\n\n')}
 
 ${section.grant_section.ai_generator_prompt}
 
@@ -181,11 +229,17 @@ Please ensure your response:
 1. Is free of spelling, grammar, and punctuation errors
 2. Has no logical errors, contradictions, or inconsistencies
 3. Fully complies with all grant requirements listed above
+4. Incorporates relevant information from the provided document content where appropriate
 `;
 
     // Generate text with all requirements incorporated
     const generatedText = await generateText(formattedPrompt);
-    await updateField(field.id, generatedText, 'complete');
+    await updateField(
+      field.id, 
+      generatedText, 
+      'complete', 
+      application.description || 'No application description provided'
+    );
 
     return {
       section_id: section.id,
@@ -210,7 +264,13 @@ Please try regenerating this section or contact support if the issue persists.
 `;
 
     const field = await createField(section.id);
-    await updateField(field.id, failureMessage, 'failed', true);
+    await updateField(
+      field.id, 
+      failureMessage, 
+      'failed', 
+      application.description || 'No application description provided',
+      true
+    );
 
     return {
       section_id: section.id,
@@ -218,6 +278,13 @@ Please try regenerating this section or contact support if the issue persists.
       error: error instanceof Error ? error.message : 'Unknown error',
       attempts: 2
     };
+  }
+}
+
+// Handle CORS preflight requests
+function handleCors(req: Request) {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
   }
 }
 
@@ -246,12 +313,8 @@ Deno.serve({
   reuseAddress: true,
 }, async (req: Request) => {
   // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: corsHeaders
-    });
-  }
+  const corsResponse = handleCors(req);
+  if (corsResponse) return corsResponse;
 
   try {
     // Validate request method

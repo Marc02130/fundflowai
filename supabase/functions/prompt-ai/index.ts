@@ -174,25 +174,43 @@ async function getUserPrompt(promptId: string) {
 }
 
 /**
- * Gets all attachments for a section.
+ * Gets all document vectors for a section.
  * @param {string} sectionId - ID of the grant section
- * @returns {Promise<Array<Object>>} List of attachments
+ * @returns {Promise<Array<Object>>} List of document vectors
  * @throws {EdgeFunctionError} If retrieval fails
  */
-async function getSectionAttachments(sectionId: string) {
-  console.log("=== Getting Section Attachments ===");
-  const { data: attachments, error: attachmentsError } = await supabase
+async function getSectionVectors(sectionId: string) {
+  console.log("=== Getting Section Document Vectors ===");
+  
+  // Get section documents first
+  const { data: documents, error: documentsError } = await supabase
     .from('grant_application_section_documents')
-    .select('*')
+    .select('id')
     .eq('grant_application_section_id', sectionId);
 
-  if (attachmentsError) {
-    console.error("Error getting attachments:", attachmentsError);
-    throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get section attachments: ${attachmentsError.message}`);
+  if (documentsError) {
+    console.error("Error getting section documents:", documentsError);
+    throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get section documents: ${documentsError.message}`);
   }
 
-  console.log("Section attachments:", attachments);
-  return attachments;
+  if (!documents?.length) {
+    console.log("No documents found for section");
+    return [];
+  }
+
+  // Get vectors for these documents
+  const { data: vectors, error: vectorsError } = await supabase
+    .from('grant_application_section_document_vectors')
+    .select('document_id, chunk_text')
+    .in('document_id', documents.map(d => d.id));
+
+  if (vectorsError) {
+    console.error("Error getting document vectors:", vectorsError);
+    throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get document vectors: ${vectorsError.message}`);
+  }
+
+  console.log("Section vectors:", vectors);
+  return vectors || [];
 }
 
 /**
@@ -325,82 +343,22 @@ Deno.serve(async (req) => {
       promptText = userPrompt.prompt_text;
     }
 
-    // Get attachments and context
-    const attachments = await getSectionAttachments(section_id);
-
-    // Get attachment contents
-    const attachmentContents = await Promise.all(
-      attachments.map(async (a) => {
-        const { data, error } = await supabase
-          .storage
-          .from('grant-documents')
-          .download(a.file_path);
-        
-        if (error) {
-          console.error(`Failed to download attachment ${a.file_name}:`, error);
-          return `[Failed to load ${a.file_name}]`;
-        }
-
-        try {
-          switch(a.file_type) {
-            case 'pdf':
-            case 'doc':
-            case 'docx':
-            case 'xls':
-            case 'xlsx':
-            case 'ppt':
-            case 'pptx':
-            case 'txt':
-            case 'json':
-            case 'xml':
-            case 'csv':
-              const textContent = await data.text();
-              return truncateText(textContent);
-            
-            case 'png':
-            case 'jpg':
-            case 'jpeg':
-            case 'tif':
-            case 'tiff':
-            case 'svg':
-              return `[Image file: ${a.file_name}]\n` +
-                     `File size: ${data.size} bytes`;
-            
-            default:
-              return `[Unsupported file type: ${a.file_type}]`;
-          }
-        } catch (e) {
-          console.error(`Failed to process ${a.file_name}:`, e);
-          return `[Failed to process ${a.file_name}: ${e.message}]`;
-        }
-      })
-    );
-
-    function truncateText(text: string, maxLength: number = 4000): string {
-      if (text.length <= maxLength) return text;
-      const halfLength = Math.floor(maxLength / 2);
-      return text.substring(0, halfLength) + 
-             "\n...[content truncated]...\n" + 
-             text.substring(text.length - halfLength);
-    }
+    // Get document vectors instead of attachments
+    const documentVectors = await getSectionVectors(section_id);
 
     // Stage 1: Initial Generation
     console.log("\n=== STAGE 1: INITIAL GENERATION - START ===");
     console.log("Prompt Text:", promptText);
     console.log("Field Data:", field);
-    console.log("Attachments:", attachments);
+    console.log("Document Vectors:", documentVectors);
 
     const aiRequest = {
       prompt: promptText,
-      attachments: attachments.map((a, i) => ({
-        name: a.file_name,
-        type: a.file_type,
-        content: attachmentContents[i]
-      })),
       context: {
         instructions: field.user_instructions,
         comments: field.user_comments_on_ai_output,
-        content: field.ai_output
+        content: field.ai_output,
+        documentContent: documentVectors.map(v => v.chunk_text).join('\n\n')
       }
     };
     console.log("AI Request:", aiRequest);
@@ -414,10 +372,16 @@ Previous Comments: ${aiRequest.context.comments || 'No previous comments'}
 Previous Content: ${aiRequest.context.content || 'No previous content'}
 
 Reference Materials:
-${aiRequest.attachments.map(a => `=== ${a.name} ===\n${a.content}\n`).join('\n')}
+${aiRequest.context.documentContent || 'No reference materials available'}
 
 Prompt:
 ${aiRequest.prompt}
+
+Please ensure your response:
+1. Is free of spelling, grammar, and punctuation errors
+2. Has no logical errors, contradictions, or inconsistencies
+3. Fully complies with all grant requirements listed above
+4. Incorporates relevant information from the provided document content where appropriate
 `;
     console.log("Formatted Prompt:", formattedPrompt);
     

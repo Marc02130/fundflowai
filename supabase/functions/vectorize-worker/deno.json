@@ -1,0 +1,17 @@
+{
+  "tasks": {
+    "deploy": "supabase functions deploy vectorize-worker"
+  },
+  "imports": {
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.7",
+    "openai": "https://esm.sh/openai@4.28.0",
+    "@langchain/text-splitter": "npm:@langchain/textsplitters@0.1.0"
+  },
+  "compilerOptions": {
+    "allowJs": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "lib": ["deno.window"],
+    "types": ["@types/node"]
+  }
+} 

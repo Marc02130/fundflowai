@@ -82,6 +82,7 @@ export default function GrantApplicationView() {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [generating, setGenerating] = useState(false);
+  const [researching, setResearching] = useState(false);
 
   useEffect(() => {
     async function fetchApplicationData() {
@@ -100,6 +101,12 @@ export default function GrantApplicationView() {
         const { data: storageFiles } = await supabase.storage
           .from('grant-attachments')
           .list(appData.id);
+
+        // Check if deep_research.md exists
+        const hasDeepResearch = storageFiles?.some(file => file.name === 'deep_research.md');
+        if (hasDeepResearch) {
+          setResearching(false);
+        }
 
         // Fetch sections with their completion status
         const { data, error: sectionsError } = await supabase
@@ -207,16 +214,29 @@ export default function GrantApplicationView() {
         if (uploadError) throw uploadError;
 
         // Create document record
-        const { error: documentError } = await supabase
+        const { data: doc, error: documentError } = await supabase
           .from('grant_application_documents')
           .insert({
+            id: fileId,
             grant_application_id: application.id,
             file_name: file.name,
             file_type: file.type.split('/').pop()?.toLowerCase() || 'other',
-            file_path: filePath
-          });
+            file_path: filePath,
+            vectorization_status: 'pending'
+          })
+          .select()
+          .single();
 
         if (documentError) throw documentError;
+
+        // Queue document for processing
+        const { error: queueError } = await supabase
+          .rpc('queue_document_for_processing', {
+            p_document_id: fileId,
+            p_document_type: 'application'
+          });
+
+        if (queueError) throw queueError;
 
         // Add to attachments list
         setAttachments(prev => [...prev, {
@@ -243,25 +263,46 @@ export default function GrantApplicationView() {
     if (!application) return;
 
     try {
+      // Check authentication status
+      const { data: { user } } = await supabase.auth.getUser();
+      console.log('Attempting deletion with user:', user?.id);
+      console.log('Application ID:', application.id);
+      console.log('Document ID:', attachmentId);
+
       const attachment = attachments.find(a => a.id === attachmentId);
       if (!attachment) return;
 
-      const filePath = `${application.id}/${attachmentId}-${attachment.name}`;
-      
-      // Delete from Supabase Storage
-      const { error: deleteError } = await supabase.storage
-        .from('grant-attachments')
-        .remove([filePath]);
+      // Delete from queue first (if exists)
+      const { error: queueError } = await supabase
+        .from('document_processing_queue')
+        .delete()
+        .eq('document_id', attachmentId)
+        .eq('document_type', 'application');
 
-      if (deleteError) throw deleteError;
+      if (queueError) throw queueError;
 
-      // Delete from database
+      // Delete vectors
+      const { error: vectorError } = await supabase
+        .from('grant_application_document_vectors')
+        .delete()
+        .eq('document_id', attachmentId);
+
+      if (vectorError) throw vectorError;
+
+      // Delete document record
       const { error: dbError } = await supabase
         .from('grant_application_documents')
         .delete()
         .eq('id', attachmentId);
 
       if (dbError) throw dbError;
+
+      // Delete from storage
+      const { error: deleteError } = await supabase.storage
+        .from('grant-attachments')
+        .remove([attachment.file_path]);
+
+      if (deleteError) throw deleteError;
 
       // Remove from attachments list
       setAttachments(prev => prev.filter(a => a.id !== attachmentId));
@@ -369,6 +410,80 @@ export default function GrantApplicationView() {
     }
   };
 
+  const handleDeepResearch = async () => {
+    if (!id || researching) return;
+
+    try {
+      setResearching(true);
+      setError(null);
+
+      // Get the user's session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('No active session');
+      }
+
+      // Call the edge function
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/deep-research`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            application_id: id
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Failed to generate research');
+      }
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error('Failed to generate research');
+      }
+
+      // Refresh attachments list to show new deep_research.md
+      const { data: documentData, error: documentError } = await supabase
+        .from('grant_application_documents')
+        .select('*')
+        .eq('grant_application_id', id);
+
+      if (documentError) throw documentError;
+
+      // Get updated file metadata from storage
+      const { data: updatedStorageFiles } = await supabase.storage
+        .from('grant-attachments')
+        .list(id);
+
+      // Transform into attachments format
+      const attachmentsList = documentData?.map(doc => {
+        const storageFile = updatedStorageFiles?.find(f => f.name === doc.file_path.split('/').pop());
+        return {
+          id: doc.id,
+          name: doc.file_name,
+          size: storageFile?.metadata?.size || 0,
+          type: doc.file_type,
+          uploadedAt: new Date(doc.created_at),
+          file_path: doc.file_path
+        };
+      }) || [];
+
+      setAttachments(attachmentsList);
+
+    } catch (error) {
+      console.error('Error generating research:', error);
+      setError(error instanceof Error ? error.message : 'Failed to generate research');
+    } finally {
+      setResearching(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="max-w-4xl mx-auto py-8 px-4">
@@ -402,10 +517,10 @@ export default function GrantApplicationView() {
   }
 
   const isInProgress = application.status === 'in-progress';
-  const allSectionsCompleted = sections.every(section => section.is_completed);
   const hasAttachments = attachments.length > 0;
   const hasDescription = Boolean(application.description?.trim());
   const canGenerateGrant = hasAttachments && hasDescription;
+  const canDeepResearch = canGenerateGrant && !attachments.some(a => a.name === 'deep_research.md');
 
   return (
     <div className="w-4/5 mx-auto py-8 px-4">
@@ -424,13 +539,8 @@ export default function GrantApplicationView() {
                 <>
                   <button
                     onClick={() => handleUpdateStatus('submitted')}
-                    disabled={updating || !allSectionsCompleted}
-                    className={`px-4 py-2 rounded-md text-white ${
-                      allSectionsCompleted
-                        ? 'bg-green-600 hover:bg-green-700'
-                        : 'bg-gray-400 cursor-not-allowed'
-                    }`}
-                    title={!allSectionsCompleted ? 'All sections must be completed before submitting' : ''}
+                    disabled={updating}
+                    className={`px-4 py-2 rounded-md text-white bg-green-600 hover:bg-green-700'`}
                   >
                     {updating ? 'Submitting...' : 'Submit'}
                   </button>
@@ -449,25 +559,6 @@ export default function GrantApplicationView() {
 
         {/* Action Buttons */}
         <div className="flex justify-end space-x-4 mb-6">
-          <button
-            onClick={handleGenerateGrant}
-            disabled={!canGenerateGrant || generating}
-            title={!canGenerateGrant ? 'Requires description and attachments to generate grant' : ''}
-            className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
-              canGenerateGrant && !generating
-                ? 'bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500'
-                : 'bg-gray-400 cursor-not-allowed'
-            }`}
-          >
-            <svg className={`mr-2 -ml-1 h-5 w-5 ${generating ? 'animate-spin' : ''}`} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-              {generating ? (
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-              ) : (
-                <path d="M10 3.75a2 2 0 10-4 0 2 2 0 004 0zM17.25 4.5a.75.75 0 00-1.5 0v5.15a3.72 3.72 0 01-2.875 3.622l-1.95.39a.75.75 0 00-.525.67v5.332c0 .414.336.75.75.75h.008a.75.75 0 00.75-.75v-4.923l1.95-.39a5.22 5.22 0 004.042-5.083V4.5zM5.75 15.75a.75.75 0 00-.75.75v2.752a.75.75 0 101.5 0v-2.752a.75.75 0 00-.75-.75zm7.5-12a.75.75 0 00-.75.75v2.752a.75.75 0 101.5 0V4.5a.75.75 0 00-.75-.75z" />
-              )}
-            </svg>
-            {generating ? 'Generating...' : 'Generate Grant'}
-          </button>
           <div className="relative">
             <input
               type="file"
@@ -480,7 +571,7 @@ export default function GrantApplicationView() {
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
-              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-600"
             >
               <svg className="mr-2 -ml-1 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
                 <path d="M10 5.5a.75.75 0 01.75.75v6.043l1.446-1.446a.75.75 0 111.06 1.06l-2.756 2.757a.75.75 0 01-1.06 0L6.684 11.907a.75.75 0 111.06-1.06l1.446 1.446V6.25A.75.75 0 0110 5.5z" />
@@ -489,6 +580,44 @@ export default function GrantApplicationView() {
               {uploading ? 'Uploading...' : 'Add Attachments'}
             </button>
           </div>
+          <button
+            onClick={handleDeepResearch}
+            disabled={!canDeepResearch || researching}
+            title={!canDeepResearch ? 'Requires description and attachments to generate research' : ''}
+            className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
+              canDeepResearch && !researching
+                ? 'bg-indigo-700 hover:bg-indigo-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-700'
+                : 'bg-gray-400 cursor-not-allowed'
+            }`}
+          >
+            <svg className={`mr-2 -ml-1 h-5 w-5 ${researching ? 'animate-spin' : ''}`} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+              {researching ? (
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+              ) : (
+                <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+              )}
+            </svg>
+            {researching ? 'Researching...' : 'Deep Research'}
+          </button>
+          <button
+            onClick={handleGenerateGrant}
+            disabled={!canGenerateGrant || generating}
+            title={!canGenerateGrant ? 'Requires description and attachments to generate grant' : ''}
+            className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
+              canGenerateGrant && !generating
+                ? 'bg-indigo-800 hover:bg-indigo-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-800'
+                : 'bg-gray-400 cursor-not-allowed'
+            }`}
+          >
+            <svg className={`mr-2 -ml-1 h-5 w-5 ${generating ? 'animate-spin' : ''}`} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+              {generating ? (
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+              ) : (
+                <path d="M10 3.75a2 2 0 10-4 0 2 2 0 004 0zM17.25 4.5a.75.75 0 00-1.5 0v5.15a3.72 3.72 0 01-2.875 3.622l-1.95.39a.75.75 0 00-.525.67v5.332c0 .414.336.75.75.75h.008a.75.75 0 00.75-.75v-4.923l1.95-.39a5.22 5.22 0 004.042-5.083V4.5zM5.75 15.75a.75.75 0 00-.75.75v2.752a.75.75 0 101.5 0v-2.752a.75.75 0 00-.75-.75zm7.5-12a.75.75 0 00-.75.75v2.752a.75.75 0 101.5 0V4.5a.75.75 0 00-.75-.75z" />
+              )}
+            </svg>
+            {generating ? 'Generating...' : 'Generate Grant'}
+          </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
