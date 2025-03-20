@@ -3,7 +3,6 @@
 # React Router
 /.react-router/
 /build/
-/dist/assets
 
 # Environment variables
 .env

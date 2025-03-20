@@ -1,105 +1,145 @@
-# Deep Research Requirements
+# Requirements for the Deep Research Feature
 
-## User Requirements
+## Overview
+The Deep Research feature provides an interactive AI-powered research process for grant applications. It includes a conversation-style interface, version history tracking, and final report generation.
 
-- Users can initiate deep research from the grant application view
-- Deep research button is disabled when:
-  - Application description is empty or null
-  - No attachments are present
-  - A deep_research.md file already exists
-- Progress feedback is shown on the button during research generation
-- Research output is attached as deep_research.md to the grant application
+## 1. User Requirements
 
-## Technical Requirements
+### Initiate Deep Research
+- Users can begin research from the grant application view via "Deep Research" button
+- **Button States**:
+  - **Disabled** when:
+    - Grant application description is empty/null
+    - No attachments present
+    - `deep_research.md` already exists
+  - **Enabled** when description and attachments exist, no `deep_research.md`
+  - **Loading State**: Shows "Researching..." during processing
 
-### API Integration
-https://platform.openai.com/docs/assistants/deep-dive#overview
-https://platform.openai.com/docs/api-reference/assistants
-- Use OpenAI's Assistants API with model specified by OPENAI_DEEP_MODEL environment variable
-- Create a specialized research assistant with:
-  1. Instructions for grant-focused research and APA citation requirements
-  2. Code interpreter and retrieval tools enabled
-  3. File handling capabilities for processing attachments
-- Research process:
-  1. Create a Thread when deep research is initiated
-  2. Upload grant description and attachments as Thread Files
-  3. Create a Message with research instructions
-  4. Run the Assistant on the Thread
-  5. Poll for completion using the Run status
-  6. Retrieve the research output from the Thread Messages
-- Store both assistant_id and thread_id in the database for traceability
-- Track the model version used in grant_applications.deep_research_model
+### Interactive Research Window
+- Opens upon clicking "Deep Research" button
+- Displays:
+  - AI-generated research outputs
+  - Follow-up questions
+  - User responses
+  - Research progress
+- Supports:
+  - User input for answering questions
+  - Feedback submission
+  - Research refinement requests
 
-### Progress States
-1. Creating Research Thread
-2. Processing Documents
-3. Generating Research
-4. Retrieving Results
-5. Saving Report
+### Version History Sidebar
+- Shows 10 most recent interaction records
+- Includes:
+  - Timestamps for each interaction
+  - Type indicators (AI output/user response)
+  - "Load More" link for older records
+- Clicking timestamp shows full content in main window
 
-### Storage and Output
-- Output Format: Markdown file (deep_research.md)
-- Storage Location: Stored with other grant attachments
-- No separate database table needed
-- Store generated prompt in grant_applications.deep_research_prompt field
-- Store model version in grant_applications.deep_research_model field
+### Final Report Generation
+- "Generate Final Report" button in research window
+- Creates comprehensive `deep_research.md`
+- Includes all research findings without additional questions
+- Automatically attaches to grant application
 
-### Research Scope
-- Research based solely on application description and attachments
-- Grant and organization requirements not included in research context
-- Citations must follow APA format
-- Source metadata included in deep_research.md file
-- Source validation performed by grant writer
+## 2. Technical Requirements
 
-### Performance and Error Handling
-- Only one research request allowed at a time (cost consideration)
-- No caching of results
-- No cancellation functionality
-- Progress feedback displayed on button during generation
-- Edge function timeout handling to be determined after testing
+### Database Structure
+```sql
+CREATE TABLE grant_application_deep_research (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  grant_application_id UUID REFERENCES grant_applications(id),
+  interaction_type TEXT CHECK (interaction_type IN ('ai_output', 'user_response', 'ai_response')),
+  content JSONB,
+  parent_id UUID REFERENCES grant_application_deep_research(id),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
 
-### UI Integration
-- Deep Research button in grant application view
-- Button states:
-  - Enabled: When description exists and has attachments
-  - Disabled: When deep_research.md exists or missing requirements
-  - Loading: Shows "Researching..." during generation
-- Error messages displayed through existing error handling UI
+### OpenAI Integration
+- Use OpenAI Assistants API with `OPENAI_DEEP_MODEL`
+- Configure research-specific assistant with:
+  - Document analysis capabilities
+  - Follow-up question generation
+  - Research refinement logic
+  - Code interpreter for data analysis
+  - Retrieval for context awareness
 
-### Model Updates
-- Model version controlled via OPENAI_DEEP_MODEL environment variable
-- No rerunning of research for model updates
-- No tracking of model version per research output
+### Processing Flow
+1. **Research Initiation**:
+   - Create new Thread
+   - Upload grant description and attachments
+   - Initialize with research instructions
+
+2. **Interactive Research**:
+   - AI generates initial research and questions
+   - User provides responses
+   - AI refines research based on feedback
+   - Continue until research is complete
+
+3. **Final Report**:
+   - Compile all interactions
+   - Generate comprehensive summary
+   - Create and store `deep_research.md`
+   - Update application documents
+
+### Data Management
+- Store all interactions in `grant_application_deep_research`
+- Use parent_id to maintain conversation thread
+- Track research progress and status
+- Handle document versioning
+
+## 3. UI Implementation
+
+### Research Interface
+- Clean, conversation-style layout
+- Clear distinction between AI and user content
+- Easy-to-use input mechanisms
+- Progress indicators
+
+### Version History
+- Chronological list of interactions
+- Visual indicators for interaction types
+- Smooth pagination for older records
+- Preview of interaction content
+
+## 4. Error Handling
+- Validate all user inputs
+- Handle API timeouts and failures
+- Provide clear error messages
+- Support graceful degradation
+- Implement retry mechanisms
+
+## 5. Security
+- Validate user sessions
+- Check application access permissions
+- Secure API key handling
+- Sanitize all inputs/outputs
+- Rate limit API calls
+
+## 6. Performance
+- Optimize large document handling
+- Implement efficient pagination
+- Cache frequent queries
+- Monitor API usage
+- Handle concurrent sessions
+
+## 7. Testing Requirements
+- Unit tests for core functionality
+- Integration tests for API calls
+- UI component testing
+- Error handling verification
+- Performance benchmarking
 
 ## Implementation Notes
+- Use TypeScript for type safety
+- Follow React best practices
+- Implement proper error boundaries
+- Use shared utilities where possible
+- Document all major components
 
-1. File Naming
-   - Research output saved as deep_research.md
-   - File name used as identifier (no document_type column needed)
-
-2. Button State Logic
-```typescript
-const canDeepResearch = hasDescription && hasAttachments && 
-                       !attachments.some(a => a.name === 'deep_research.md');
-```
-
-3. Progress Tracking
-```typescript
-enum ResearchState {
-  GENERATING_PROMPT = 'Generating prompt...',
-  RESEARCHING = 'Researching...',
-  SAVING = 'Saving report...'
-}
-```
-
-4. Error Scenarios
-   - Missing description or attachments
-   - API rate limits (to be tested)
-   - Edge function timeout (to be tested)
-   - Storage failures
-   - Invalid research output
-
-5. Security Considerations
-   - Use existing file storage permissions
-   - Validate user session before research
-   - Rate limiting based on OpenAI API limits
+## Limitations
+- Maximum session duration: 60 minutes
+- API rate limits per OpenAI quotas
+- Maximum document size: 100MB
+- Concurrent session limit: 5
+- Maximum interactions per session: 50

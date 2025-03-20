@@ -324,7 +324,7 @@ export default function Dashboard() {
       {/* Main content area */}
       <div className="flex-1">
         <header className="bg-white shadow">
-          <div className="flex items-center justify-between py-12 px-6 pb-2">
+          <div className="flex items-center justify-between py-12 px-6 pb-1">
             <h1 className="text-2xl font-bold text-gray-900">
               {sectionName || (
                 <>
@@ -339,7 +339,7 @@ export default function Dashboard() {
         </header>
         
         <main className="py-6">
-          <Outlet />
+          <Outlet context={{ setSectionName }} />
         </main>
       </div>
     </div>

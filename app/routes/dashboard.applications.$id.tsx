@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useState, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { supabase } from '~/lib/supabase';
 
 interface GrantApplication {
@@ -57,6 +57,10 @@ interface Attachment {
   file_path: string;
 }
 
+type OutletContext = {
+  setSectionName: (name: string | null) => void;
+};
+
 // Sanitize file name for storage
 const sanitizeFileName = (fileName: string): string => {
   return fileName
@@ -73,6 +77,7 @@ const sanitizeFileName = (fileName: string): string => {
 export default function GrantApplicationView() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { setSectionName } = useOutletContext<OutletContext>();
   const [application, setApplication] = useState<GrantApplication | null>(null);
   const [sections, setSections] = useState<ApplicationSection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,6 +101,7 @@ export default function GrantApplicationView() {
 
         if (appError) throw appError;
         setApplication(appData);
+        setSectionName(appData.title);
 
         // Get file metadata from storage
         const { data: storageFiles } = await supabase.storage
@@ -168,7 +174,8 @@ export default function GrantApplicationView() {
     }
 
     fetchApplicationData();
-  }, [id]);
+    return () => setSectionName(null);
+  }, [id, setSectionName]);
 
   const handleUpdateStatus = async (newStatus: 'cancelled' | 'submitted') => {
     if (!application || updating) return;
@@ -410,78 +417,9 @@ export default function GrantApplicationView() {
     }
   };
 
-  const handleDeepResearch = async () => {
+  const handleDeepResearch = () => {
     if (!id || researching) return;
-
-    try {
-      setResearching(true);
-      setError(null);
-
-      // Get the user's session
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('No active session');
-      }
-
-      // Call the edge function
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/deep-research`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            application_id: id
-          })
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error?.message || 'Failed to generate research');
-      }
-
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error('Failed to generate research');
-      }
-
-      // Refresh attachments list to show new deep_research.md
-      const { data: documentData, error: documentError } = await supabase
-        .from('grant_application_documents')
-        .select('*')
-        .eq('grant_application_id', id);
-
-      if (documentError) throw documentError;
-
-      // Get updated file metadata from storage
-      const { data: updatedStorageFiles } = await supabase.storage
-        .from('grant-attachments')
-        .list(id);
-
-      // Transform into attachments format
-      const attachmentsList = documentData?.map(doc => {
-        const storageFile = updatedStorageFiles?.find(f => f.name === doc.file_path.split('/').pop());
-        return {
-          id: doc.id,
-          name: doc.file_name,
-          size: storageFile?.metadata?.size || 0,
-          type: doc.file_type,
-          uploadedAt: new Date(doc.created_at),
-          file_path: doc.file_path
-        };
-      }) || [];
-
-      setAttachments(attachmentsList);
-
-    } catch (error) {
-      console.error('Error generating research:', error);
-      setError(error instanceof Error ? error.message : 'Failed to generate research');
-    } finally {
-      setResearching(false);
-    }
+    navigate(`/dashboard/applications/${id}/research`);
   };
 
   if (loading) {
@@ -526,110 +464,109 @@ export default function GrantApplicationView() {
     <div className="w-4/5 mx-auto py-8 px-4">
       <div className="bg-white shadow rounded-lg p-6">
         <div className="mb-6">
-          <div className="flex justify-between items-start">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">{application.title}</h1>
-              <p className="text-sm text-gray-500">
-                Created {new Date(application.created_at).toLocaleDateString()}
-                {application.updated_at && ` • Last updated ${new Date(application.updated_at).toLocaleDateString()}`}
-              </p>
-            </div>
+          {/* Action Buttons */}
+          <div className="flex justify-between items-center mb-6">
+            {/* Left side buttons */}
             <div className="flex space-x-4">
-              {isInProgress && (
-                <>
-                  <button
-                    onClick={() => handleUpdateStatus('submitted')}
-                    disabled={updating}
-                    className={`px-4 py-2 rounded-md text-white bg-green-600 hover:bg-green-700'`}
-                  >
-                    {updating ? 'Submitting...' : 'Submit'}
-                  </button>
-                  <button
-                    onClick={() => handleUpdateStatus('cancelled')}
-                    disabled={updating}
-                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md"
-                  >
-                    {updating ? 'Cancelling...' : 'Cancel'}
-                  </button>
-                </>
-              )}
+              <div className="relative">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileSelect}
+                  multiple
+                  className="hidden"
+                  accept=".pdf,.doc,.docx,.txt"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-600"
+                >
+                  <svg className="mr-2 -ml-1 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M10 5.5a.75.75 0 01.75.75v6.043l1.446-1.446a.75.75 0 111.06 1.06l-2.756 2.757a.75.75 0 01-1.06 0L6.684 11.907a.75.75 0 111.06-1.06l1.446 1.446V6.25A.75.75 0 0110 5.5z" />
+                    <path d="M5.507 4.507C7.254 2.76 9.613 2 12 2c2.387 0 4.746.76 6.493 2.507 1.747 1.747 2.507 4.106 2.507 6.493 0 2.387-.76 4.746-2.507 6.493C16.746 19.24 14.387 20 12 20c-2.387 0-4.746-.76-6.493-2.507C3.76 15.746 3 13.387 3 11c0-2.387.76-4.746 2.507-6.493z" />
+                  </svg>
+                  {uploading ? 'Uploading...' : 'Add Attachments'}
+                </button>
+              </div>
+              <button
+                onClick={handleDeepResearch}
+                disabled={!canDeepResearch || researching}
+                title={!canDeepResearch ? 'Requires description and attachments to generate research' : ''}
+                className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
+                  canDeepResearch && !researching
+                    ? 'bg-indigo-700 hover:bg-indigo-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-700'
+                    : 'bg-gray-400 cursor-not-allowed'
+                }`}
+              >
+                <svg className={`mr-2 -ml-1 h-5 w-5 ${researching ? 'animate-spin' : ''}`} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                  {researching ? (
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                  ) : (
+                    <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
+                  )}
+                </svg>
+                {researching ? 'Researching...' : 'Deep Research'}
+              </button>
+              <button
+                onClick={handleGenerateGrant}
+                disabled={!canGenerateGrant || generating}
+                title={!canGenerateGrant ? 'Requires description and attachments to generate grant' : ''}
+                className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
+                  canGenerateGrant && !generating
+                    ? 'bg-indigo-800 hover:bg-indigo-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-800'
+                    : 'bg-gray-400 cursor-not-allowed'
+                }`}
+              >
+                <svg className={`mr-2 -ml-1 h-5 w-5 ${generating ? 'animate-spin' : ''}`} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                  {generating ? (
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                  ) : (
+                    <path d="M10 3.75a2 2 0 10-4 0 2 2 0 004 0zM17.25 4.5a.75.75 0 00-1.5 0v5.15a3.72 3.72 0 01-2.875 3.622l-1.95.39a.75.75 0 00-.525.67v5.332c0 .414.336.75.75.75h.008a.75.75 0 00.75-.75v-4.923l1.95-.39a5.22 5.22 0 004.042-5.083V4.5zM5.75 15.75a.75.75 0 00-.75.75v2.752a.75.75 0 101.5 0v-2.752a.75.75 0 00-.75-.75zm7.5-12a.75.75 0 00-.75.75v2.752a.75.75 0 101.5 0V4.5a.75.75 0 00-.75-.75z" />
+                  )}
+                </svg>
+                {generating ? 'Generating...' : 'Generate Grant'}
+              </button>
             </div>
+
+            {/* Right side buttons */}
+            {isInProgress && (
+              <div className="flex space-x-4">
+                <button
+                  onClick={() => handleUpdateStatus('submitted')}
+                  disabled={updating}
+                  className={`px-4 py-2 rounded-md text-white bg-green-600 hover:bg-green-700'`}
+                >
+                  {updating ? 'Submitting...' : 'Submit'}
+                </button>
+                <button
+                  onClick={() => handleUpdateStatus('cancelled')}
+                  disabled={updating}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md"
+                >
+                  {updating ? 'Cancelling...' : 'Cancel'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Create date below buttons */}
+          <div className="text-sm text-gray-500">
+            Created {new Date(application.created_at).toLocaleDateString()}
+            {application.updated_at && ` • Last updated ${new Date(application.updated_at).toLocaleDateString()}`}
           </div>
         </div>
-
-        {/* Action Buttons */}
-        <div className="flex justify-end space-x-4 mb-6">
-          <div className="relative">
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileSelect}
-              multiple
-              className="hidden"
-              accept=".pdf,.doc,.docx,.txt"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-600"
-            >
-              <svg className="mr-2 -ml-1 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M10 5.5a.75.75 0 01.75.75v6.043l1.446-1.446a.75.75 0 111.06 1.06l-2.756 2.757a.75.75 0 01-1.06 0L6.684 11.907a.75.75 0 111.06-1.06l1.446 1.446V6.25A.75.75 0 0110 5.5z" />
-                <path d="M5.507 4.507C7.254 2.76 9.613 2 12 2c2.387 0 4.746.76 6.493 2.507 1.747 1.747 2.507 4.106 2.507 6.493 0 2.387-.76 4.746-2.507 6.493C16.746 19.24 14.387 20 12 20c-2.387 0-4.746-.76-6.493-2.507C3.76 15.746 3 13.387 3 11c0-2.387.76-4.746 2.507-6.493z" />
-              </svg>
-              {uploading ? 'Uploading...' : 'Add Attachments'}
-            </button>
-          </div>
-          <button
-            onClick={handleDeepResearch}
-            disabled={!canDeepResearch || researching}
-            title={!canDeepResearch ? 'Requires description and attachments to generate research' : ''}
-            className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
-              canDeepResearch && !researching
-                ? 'bg-indigo-700 hover:bg-indigo-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-700'
-                : 'bg-gray-400 cursor-not-allowed'
-            }`}
-          >
-            <svg className={`mr-2 -ml-1 h-5 w-5 ${researching ? 'animate-spin' : ''}`} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-              {researching ? (
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-              ) : (
-                <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-              )}
-            </svg>
-            {researching ? 'Researching...' : 'Deep Research'}
-          </button>
-          <button
-            onClick={handleGenerateGrant}
-            disabled={!canGenerateGrant || generating}
-            title={!canGenerateGrant ? 'Requires description and attachments to generate grant' : ''}
-            className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
-              canGenerateGrant && !generating
-                ? 'bg-indigo-800 hover:bg-indigo-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-800'
-                : 'bg-gray-400 cursor-not-allowed'
-            }`}
-          >
-            <svg className={`mr-2 -ml-1 h-5 w-5 ${generating ? 'animate-spin' : ''}`} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-              {generating ? (
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-              ) : (
-                <path d="M10 3.75a2 2 0 10-4 0 2 2 0 004 0zM17.25 4.5a.75.75 0 00-1.5 0v5.15a3.72 3.72 0 01-2.875 3.622l-1.95.39a.75.75 0 00-.525.67v5.332c0 .414.336.75.75.75h.008a.75.75 0 00.75-.75v-4.923l1.95-.39a5.22 5.22 0 004.042-5.083V4.5zM5.75 15.75a.75.75 0 00-.75.75v2.752a.75.75 0 101.5 0v-2.752a.75.75 0 00-.75-.75zm7.5-12a.75.75 0 00-.75.75v2.752a.75.75 0 101.5 0V4.5a.75.75 0 00-.75-.75z" />
-              )}
-            </svg>
-            {generating ? 'Generating...' : 'Generate Grant'}
-          </button>
-        </div>
-
+        
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
           <div>
             <h2 className="text-sm font-medium text-gray-500">Status</h2>
-            <p className="mt-1 text-lg">{application.status}</p>
+            <p className="mt-1 text-lg text-left">{application.status}</p>
           </div>
-          <div>
+          <div className="text-center">
             <h2 className="text-sm font-medium text-gray-500">Resubmission</h2>
             <p className="mt-1 text-lg">{application.resubmission ? 'Yes' : 'No'}</p>
           </div>
-          <div>
+          <div className="text-right">
             <h2 className="text-sm font-medium text-gray-500">Amount Requested</h2>
             <p className="mt-1 text-lg">
               {application.amount_requested 

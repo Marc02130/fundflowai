@@ -8,9 +8,9 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
-import { handleError, EdgeFunctionError, ERROR_CODES } from '../shared/errors.ts'
-import { validateUserSession, validateUserAccess } from '../shared/auth.ts'
-import { OpenAI } from 'openai'
+import { handleError, EdgeFunctionError, ERROR_CODES } from 'errors'
+import { validateUserSession, validateUserAccess } from 'auth'
+import OpenAI from 'openai'
 
 // Define CORS headers
 const corsHeaders = {
@@ -21,7 +21,9 @@ const corsHeaders = {
 }
 
 interface RequestBody {
-  application_id: string
+  application_id: string;
+  user_input?: string;
+  generate_report?: boolean;
 }
 
 interface ApplicationDocument {
@@ -44,6 +46,19 @@ interface ThreadMessage {
   }>
 }
 
+// Add type definitions for message content
+interface MessageContent {
+  type: string;
+  text: {
+    value: string;
+  };
+}
+
+interface FileSegment {
+  path: string;
+  content: string;
+}
+
 export async function handleRequest(req: Request) {
   try {
     // Handle CORS preflight requests
@@ -60,10 +75,10 @@ export async function handleRequest(req: Request) {
     const userId = await validateUserSession(authHeader)
 
     // Get request JSON
-    const { application_id } = await req.json() as RequestBody
+    const body = await req.json() as RequestBody
 
     // Validate user has access to this application
-    await validateUserAccess(userId, application_id)
+    await validateUserAccess(userId, body.application_id)
 
     // Create Supabase client
     const supabaseClient = createClient(
@@ -95,12 +110,7 @@ export async function handleRequest(req: Request) {
         // @ts-ignore - Access error details
         message: bucketsError?.message,
         // @ts-ignore - Access error details
-        details: bucketsError?.details,
-        // Log auth details
-        auth: {
-          hasAuthHeader: !!supabaseClient.auth.headers,
-          headers: supabaseClient.auth.headers
-        }
+        details: bucketsError?.details
       })
     } else {
       console.log('[DEBUG] Available buckets:', buckets.map(b => ({
@@ -210,7 +220,7 @@ export async function handleRequest(req: Request) {
           file_path
         )
       `)
-      .eq('id', application_id)
+      .eq('id', body.application_id)
       .single()
 
     if (applicationError) throw applicationError
@@ -223,24 +233,15 @@ export async function handleRequest(req: Request) {
     let assistant;
     let thread;
     try {
-      // Debug the request before sending
-      console.log('[DEBUG] Assistant creation params:', {
+      assistant = await openai.beta.assistants.create({
         name: "Grant Research Assistant",
-        model: Deno.env.get('OPENAI_DEEP_MODEL') ?? 'gpt-4o',
-        tools: [{ type: "code_interpreter" }, { type: "file_search" }],
-        headers: v2RequestOptions.headers
-      })
-
-      assistant = await openai.beta.assistants.create(
-        {
-          name: "Grant Research Assistant",
-          description: "Specialized assistant for grant application research",
-          model: Deno.env.get('OPENAI_DEEP_MODEL') ?? 'gpt-4o',
-          tools: [
-            { type: "code_interpreter" },
-            { type: "file_search" }
-          ],
-          instructions: `You are a specialized research assistant for grant applications. Your task is to:
+        description: "Specialized assistant for grant application research",
+        model: Deno.env.get('OPENAI_DEEP_MODEL') ?? 'gpt-4',
+        tools: [
+          { type: "code_interpreter" },
+          { type: "file_search" }
+        ],
+        instructions: `You are a specialized research assistant for grant applications. Your task is to:
 1. Analyze the provided grant application description and attachments
 2. Conduct thorough research based on the content
 3. Generate a comprehensive research report in markdown format
@@ -248,55 +249,19 @@ export async function handleRequest(req: Request) {
 5. Structure the output with clear sections
 6. Include source metadata for validation
 7. Focus on supporting the grant application's goals`
-        },
-        v2RequestOptions
-      )
-
-      // Debug successful creation
-      console.log('[DEBUG] Assistant created successfully:', {
-        id: assistant.id,
-        model: assistant.model,
-        tools: assistant.tools
-      })
+      });
     } catch (error) {
-      // Enhanced error logging
-      console.error('[DEBUG] Assistant creation error:', {
-        name: error instanceof Error ? error.name : 'Unknown',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        // @ts-ignore - OpenAI error properties
-        status: error?.status,
-        // @ts-ignore - OpenAI error properties 
-        headers: error?.headers,
-        // @ts-ignore - OpenAI error properties
-        error: error?.error,
-        // Log the full error for debugging
-        fullError: error
-      })
-      throw error
+      console.error('Error creating assistant:', error);
+      throw error;
     }
 
     console.log('Creating thread...')
     // Create a thread
     try {
-      thread = await openai.beta.threads.create(v2RequestOptions)
-      console.log('[DEBUG] Thread created:', {
-        id: thread.id,
-        created_at: thread.created_at
-      })
+      thread = await openai.beta.threads.create();
     } catch (error) {
-      console.error('[DEBUG] Thread creation error:', {
-        error: {
-          name: error instanceof Error ? error.name : 'Unknown',
-          message: error instanceof Error ? error.message : 'Unknown error',
-          // @ts-ignore - OpenAI error properties
-          status: error?.status,
-          // @ts-ignore - OpenAI error properties
-          headers: error?.headers,
-          // @ts-ignore - OpenAI error properties
-          error: error?.error
-        }
-      })
-      throw error
+      console.error('Error creating thread:', error);
+      throw error;
     }
 
     console.log('Processing attachments...')
@@ -313,7 +278,7 @@ export async function handleRequest(req: Request) {
       // Normalize the file path
       const normalizedPath = doc.file_path
         .split('/')
-        .map(segment => segment.trim())
+        .map((segment: string) => segment.trim())
         .filter(Boolean)
         .join('/')
 
@@ -321,7 +286,7 @@ export async function handleRequest(req: Request) {
       const pathVariants = [
         normalizedPath,
         encodeURIComponent(normalizedPath),
-        normalizedPath.split('/').map(segment => encodeURIComponent(segment)).join('/'),
+        normalizedPath.split('/').map((segment: string) => encodeURIComponent(segment)).join('/'),
         doc.file_path.replace(/\s+/g, '_'),
         doc.file_path
       ]
@@ -417,25 +382,25 @@ export async function handleRequest(req: Request) {
 
     console.log('Uploading files to OpenAI...')
     // Upload files to thread
-    const fileIds = []
-    for (const file of attachmentFiles) {
-      try {
-        const threadFile = await openai.beta.threads.files.create(
-          thread.id,
+    const files = await Promise.all(
+      attachmentFiles.map(async (file) => {
+        const response = await fetch(
+          'https://api.openai.com/v1/files',
           {
-            file: new File([file.content], file.filename, { type: 'text/plain' }),
-            purpose: 'assistants'
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
+              'Content-Type': 'multipart/form-data'
+            },
+            body: JSON.stringify({
+              file: new File([file.content], file.filename, { type: 'text/plain' }),
+              purpose: 'assistants'
+            })
           }
-        )
-        fileIds.push(threadFile.id)
-      } catch (error: unknown) {
-        console.error(`Error uploading file ${file.filename} to OpenAI:`, error)
-        if (error instanceof Error) {
-          throw new Error(`Failed to upload file ${file.filename} to OpenAI: ${error.message}`)
-        }
-        throw new Error(`Failed to upload file ${file.filename} to OpenAI: Unknown error`)
-      }
-    }
+        );
+        return response.json();
+      })
+    );
 
     console.log('Creating research request...')
     // Create message with application description and research request
@@ -506,7 +471,7 @@ Requirements:
     console.log('Saving research output...')
     // Save research output
     const researchFileName = 'deep_research.md'
-    const researchFilePath = `${application_id}/${crypto.randomUUID()}-${researchFileName}`
+    const researchFilePath = `${body.application_id}/${crypto.randomUUID()}-${researchFileName}`
 
     // Upload to storage
     const { error: uploadError } = await supabaseClient.storage
@@ -522,7 +487,7 @@ Requirements:
     const { error: documentError } = await supabaseClient
       .from('grant_application_documents')
       .insert({
-        grant_application_id: application_id,
+        grant_application_id: body.application_id,
         file_name: researchFileName,
         file_type: 'md',
         file_path: researchFilePath
@@ -540,7 +505,7 @@ Requirements:
         deep_research_prompt: application.description,
         deep_research_model: assistant.model
       })
-      .eq('id', application_id)
+      .eq('id', body.application_id)
 
     if (updateError) {
       console.error('Error updating application:', updateError)
@@ -548,18 +513,113 @@ Requirements:
     }
 
     console.log('Research generation completed successfully')
-    return new Response(
-      JSON.stringify({
-        success: true,
-        message: 'Research generated successfully',
-        assistant_id: assistant.id,
-        thread_id: thread.id
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200,
+
+    if (body.generate_report) {
+      // Generate final report
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: 'Research generated successfully',
+          assistant_id: assistant.id,
+          thread_id: thread.id
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 200,
+        }
+      )
+    } else {
+      // Handle interactive research
+      if (body.user_input) {
+        // Save user input
+        const { error: inputError } = await supabaseClient
+          .from('grant_application_deep_research')
+          .insert({
+            grant_application_id: body.application_id,
+            interaction_type: 'user_response',
+            content: { text: body.user_input },
+            parent_id: null // TODO: Track conversation thread
+          });
+
+        if (inputError) throw inputError;
+
+        // Send user input to assistant
+        await openai.beta.threads.messages.create(
+          thread.id,
+          {
+            role: 'user',
+            content: body.user_input
+          }
+        );
+
+        // Run the assistant
+        const run = await openai.beta.threads.runs.create(
+          thread.id,
+          { assistant_id: assistant.id }
+        );
+
+        // Wait for completion
+        let completedRun;
+        while (true) {
+          const runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+          if (runStatus.status === 'completed') {
+            completedRun = runStatus;
+            break;
+          } else if (runStatus.status === 'failed') {
+            throw new Error(`Research generation failed: ${runStatus.last_error?.message}`);
+          } else if (runStatus.status === 'expired') {
+            throw new Error('Research generation timed out');
+          }
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+
+        // Get assistant's response
+        const messages = await openai.beta.threads.messages.list(thread.id);
+        const aiResponse = messages.data
+          .filter((msg) => msg.role === 'assistant')
+          .map((msg) => msg.content as MessageContent[])
+          .flat()
+          .filter((content) => content.type === 'text')
+          .map((content) => content.text.value)
+          .join('\n\n');
+
+        // Save AI response
+        const { error: responseError } = await supabaseClient
+          .from('grant_application_deep_research')
+          .insert({
+            grant_application_id: body.application_id,
+            interaction_type: 'ai_response',
+            content: { text: aiResponse },
+            parent_id: null // TODO: Track conversation thread
+          });
+
+        if (responseError) throw responseError;
+
+        // Return success
+        return new Response(
+          JSON.stringify({
+            success: true,
+            message: 'Research interaction processed successfully'
+          }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 200
+          }
+        );
       }
-    )
+
+      // Return success
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: 'Research interaction processed successfully'
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 200
+        }
+      );
+    }
 
   } catch (error: unknown) {
     console.error('Error in deep-research function:', error)

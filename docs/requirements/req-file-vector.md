@@ -1,116 +1,137 @@
-Certainly! Below are the detailed requirements for setting up a document processing system in your Node.js and React Router application. This system uses two distinct Supabase Edge Functions—one for text extraction and another for vector generation—triggered by a cron job on the Supabase server. The setup ensures modularity, scalability, and efficient handling of document uploads, text extraction, and vectorization.
+# Document Processing and Vectorization System Requirements
 
----
+## Overview
+This document outlines the requirements for a document processing system that handles file uploads, text extraction, and vector generation for grant applications. The system uses Supabase Edge Functions for processing and stores vectors for semantic search capabilities.
 
 ## Requirements
 
 ### 1. Queue Management
 - **Objective**: Track the processing status of uploaded documents.
 - **Details**:
-  - Create a table in Supabase PostgreSQL called `document_processing_queue` with the following columns:
-    - `id` (UUID, primary key, auto-generated): Unique identifier for each queue entry.
-    - `document_id` (UUID): document id in tables like `grant_application_documents` or `grant_application_section_documents`.
-    - `document_type` (string): Specifies the document's origin (e.g., `'application'` or `'section'`).
-    - `status` (string): Tracks processing state (e.g., `'pending'`, `'extracting'`, `'extracted'`, `'vectorizing'`, `'completed'`, `'failed'`).
-    - `attempts` (integer, default 0): Counts processing attempts for retry logic.
-    - `error` (string, nullable): Stores error messages if processing fails.
-    - `created_at` (timestamp, auto-generated): Records when the entry was created.
-    - `updated_at` (timestamp, auto-generated): Tracks the last update time.
-  - **Workflow**: When a document is uploaded to Supabase Storage, insert a record into this table with `status = 'pending'`.
+  - Use `document_processing_queue` table in Supabase PostgreSQL with columns:
+    - `id` (UUID, primary key, auto-generated)
+    - `document_id` (UUID): Links to document tables
+    - `document_type` (string): Either 'application' or 'section'
+    - `status` (string): States include 'pending', 'extracting', 'extracted', 'vectorizing', 'completed', 'failed'
+    - `attempts` (integer, default 0): For retry logic
+    - `error` (string, nullable): Error messages
+    - `created_at` (timestamp)
+    - `updated_at` (timestamp)
+  - **Workflow**: Document upload → Queue entry (status='pending') → Processing → Completion/Failure
 
----
-
-### 2. Text Extraction Edge Function
-- **Objective**: Extract text from uploaded documents and store it in the database.
-- **Trigger**: Invoked by the cron job for documents with `status = 'pending'`.
+### 2. Text Extraction Edge Function (`extract-text`)
+- **Objective**: Extract text from uploaded documents.
 - **Details**:
-  - **Input**: Document ID and file path from the `document_processing_queue`.
+  - **Input**: 
+    ```json
+    {
+      "document_id": "string",
+      "document_type": "string"
+    }
+    ```
   - **Process**:
-    - Download the document from Supabase Storage using the provided file path.
-    - Identify the file type (e.g., PDF, DOCX, TXT) from the document metadata.
-    - Extract text using appropriate libraries:
-      - **PDF**: Use `pdf-parse` or a lightweight alternative like `pdf-parse-wasm`.
-      - **DOCX**: Use `mammoth` or `docx2txt`.
-      - **TXT**: Read directly with standard file reading methods.
-      - **Other Formats**: Extend support as needed (e.g., `xlsx` for Excel, `csv-parse` for CSV).
-    - Store the extracted text in the corresponding document table (e.g., add an `extracted_text` column to `grant_application_documents`).
+    - Download document from Supabase Storage
+    - Support multiple file types:
+      - PDF: Using `pdf-parse`
+      - DOCX: Using `mammoth`
+      - XLSX: Using `xlsx`
+      - TXT: Direct reading
+    - Store extracted text in document tables
   - **Output**:
-    - On success, update the queue `status` to `'extracted'`.
-    - On failure, update `status` to `'failed'`, log the error in the `error` column, and increment `attempts`.
+    - Success: Update status to 'extracted'
+    - Failure: Update status to 'failed', log error
   - **Error Handling**:
-    - Retry up to 3 times for transient errors (e.g., network timeouts).
-    - If retries fail, mark as `'failed'` and skip to the next document.
+    - Retry up to 3 times
+    - Log errors in `processing_logs`
+  - **Limitations**:
+    - Maximum file size: 50MB
+    - Processing timeout: 60 seconds
 
----
-
-### 3. Vector Generation Edge Function
-- **Objective**: Generate vector embeddings from extracted text and store them in Supabase.
-- **Trigger**: Invoked by the cron job for documents with `status = 'extracted'`.
+### 3. Vector Generation Edge Function (`vectorize-worker`)
+- **Objective**: Generate and store vector embeddings.
 - **Details**:
-  - **Input**: Document ID and `extracted_text` from the document table.
+  - **Input**:
+    ```json
+    {
+      "document_id": "string",
+      "document_type": "string"
+    }
+    ```
   - **Process**:
-    - Fetch the `extracted_text` for the document.
-    - Generate vector embeddings using an embedding model (e.g., OpenAI's `text-embedding-ada-002`).
-    - For large texts, split into chunks using a text splitter (e.g., `RecursiveCharacterTextSplitter`) and generate multiple vectors.
-  - **Output**:
-    - Store vectors in a dedicated table (e.g., `grant_application_document_vectors`) with columns:
-      - `id` (UUID, primary key).
-      - `document_id` (UUID, foreign key): Links to the original document.
-      - `vector` (vector type, e.g., `vector(1536)` for OpenAI embeddings).
-      - `chunk_index` (integer): Tracks chunk order if multiple vectors are created.
-    - On success, update the queue `status` to `'completed'`.
-    - On failure, update `status` to `'failed'`, log the error, and increment `attempts`.
-  - **Error Handling**:
-    - Retry up to 3 times for API or network errors.
-    - Handle large texts by processing chunks incrementally.
+    - Use OpenAI's `text-embedding-ada-002` model
+    - Split text into chunks using `@langchain/text-splitter`
+    - Generate embeddings for each chunk
+    - Validate vector dimensions (1536)
+  - **Storage**:
+    - `grant_application_document_vectors` table:
+      - `id` (UUID)
+      - `document_id` (UUID)
+      - `vector` (vector(1536))
+      - `chunk_text` (text)
+    - `grant_application_section_document_vectors` table:
+      - Same structure as above
+  - **Limitations**:
+    - Maximum chunk size: 8192 tokens
+    - Maximum chunks per document: 100
+    - Vector dimension: 1536
 
----
+### 4. Processing Flow
+1. **Document Upload**:
+   - File uploaded to Supabase Storage
+   - Entry created in `document_processing_queue`
 
-### 4. Cron Job Configuration
-- **Objective**: Periodically trigger document processing from the queue.
-- **Details**:
-  - Configure a cron job on the Supabase server (e.g., using `pg_cron`) to run every 2 minutes.
-  - **Workflow**:
-    - Query `document_processing_queue` for entries with `status = 'pending'` and invoke the Text Extraction Edge Function.
-    - Query for entries with `status = 'extracted'` and invoke the Vector Generation Edge Function.
-    - Process documents in batches (e.g., 5-10 per run) to manage server load.
-  - Use HTTP requests or Supabase's internal mechanisms to trigger the Edge Functions.
+2. **Text Extraction**:
+   - `extract-text` processes pending documents
+   - Updates queue status
+   - Triggers vectorization on success
 
----
+3. **Vector Generation**:
+   - `vectorize-worker` processes extracted documents
+   - Generates and stores vectors
+   - Updates final status
 
-### 5. Error Handling and Retries
-- **Objective**: Ensure reliability by managing failures and retries.
-- **Details**:
-  - For both Edge Functions:
-    - If an error occurs and `attempts < 3`, reset `status` to `'pending'` and increment `attempts`.
-    - After 3 failed attempts, set `status` to `'failed'` and log the error.
-  - Create a `processing_logs` table to store error details and key events, with columns:
-    - `id` (UUID, primary key).
-    - `document_id` (UUID).
-    - `event` (string): Description of the event (e.g., "Extraction failed").
-    - `details` (string): Additional info (e.g., error message).
-    - `timestamp` (timestamp).
+### 5. Error Handling and Logging
+- **Processing Logs Table**:
+  ```sql
+  CREATE TABLE processing_logs (
+    id UUID PRIMARY KEY,
+    document_id UUID,
+    event TEXT,
+    details TEXT,
+    timestamp TIMESTAMPTZ DEFAULT NOW()
+  );
+  ```
+- Log key events:
+  - Processing start/completion
+  - Errors and retries
+  - Status changes
+  - Vector generation metrics
 
----
+### 6. Performance and Security
+- **Performance**:
+  - Stream large files
+  - Optimize chunk sizes
+  - Batch vector operations
+  - Monitor memory usage
 
-### 6. Performance and Scalability
-- **Objective**: Optimize processing for efficiency and scalability.
-- **Details**:
-  - Limit batch sizes to 10 documents per cron run to avoid overloading resources.
-  - Use streaming for downloading large files from Supabase Storage.
-  - Optimize text extraction with fast, lightweight libraries.
-  - Handle large texts in the Vector Generation Function by splitting them into chunks.
+- **Security**:
+  - Validate file types and sizes
+  - Secure API keys
+  - Sanitize extracted text
+  - Monitor usage limits
 
----
+### 7. Testing Requirements
+- Test file type support
+- Verify extraction accuracy
+- Validate vector dimensions
+- Check error handling
+- Test rate limiting
+- Verify vector storage
+- Monitor processing logs
 
-### 7. Monitoring and Logging
-- **Objective**: Track progress and troubleshoot issues.
-- **Details**:
-  - Log key events (e.g., "Extraction started", "Vectorization completed") in the `processing_logs` table.
-  - Include timestamps, document IDs, and error messages for each log entry.
-  - Use Supabase's built-in logging or an external monitoring tool to analyze performance.
-
----
-
-## Summary
-This system separates document processing into two Edge Functions—text extraction and vector generation—triggered by a cron job. Documents are tracked via a queue table, processed in batches, and secured with Supabase authentication. Error handling, retries, and logging ensure reliability, while batching and chunking support scalability. These requirements provide a robust foundation for your grant writing application's document processing needs.
+## Implementation Notes
+- Use shared utilities for error handling and authentication
+- Implement proper logging throughout the process
+- Monitor OpenAI API usage and rate limits
+- Ensure proper error handling and retries
+- Maintain vector quality through proper chunking and validation

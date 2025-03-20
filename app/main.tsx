@@ -14,6 +14,7 @@ import NewApplication from './routes/dashboard.new';
 import Applications from './routes/dashboard.applications';
 import ApplicationView from './routes/dashboard.applications.$id';
 import SectionEditor from './routes/dashboard.applications.$id.sections.$sectionId';
+import ResearchWindow from './routes/dashboard.applications.$id.research';
 
 const router = createBrowserRouter([
   {
@@ -42,22 +43,42 @@ const router = createBrowserRouter([
       },
       {
         path: 'applications',
-        element: <Applications />,
-        errorElement: <div>Error loading applications</div>
-      },
-      {
-        path: 'applications/:id',
-        element: <ApplicationView />,
-        errorElement: <div>Error loading application</div>
-      },
-      {
-        path: 'applications/:id/sections/:sectionId',
-        element: <SectionEditor />,
-        errorElement: <div>Error loading section</div>
-      },
+        children: [
+          {
+            index: true,
+            element: <Applications />,
+            errorElement: <div>Error loading applications</div>
+          },
+          {
+            path: ':id',
+            children: [
+              {
+                index: true,
+                element: <ApplicationView />,
+                errorElement: <div>Error loading application</div>
+              },
+              {
+                path: 'research',
+                element: <ResearchWindow />,
+                errorElement: <div>Error loading research window</div>
+              },
+              {
+                path: 'sections/:sectionId',
+                element: <SectionEditor />,
+                errorElement: <div>Error loading section</div>
+              }
+            ]
+          }
+        ]
+      }
     ],
   },
-]);
+], {
+  future: {
+    v7_normalizeFormMethod: true,
+    v7_relativeSplatPath: true
+  }
+});
 
 const root = createRoot(document.getElementById('root')!);
 
