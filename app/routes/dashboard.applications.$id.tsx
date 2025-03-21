@@ -458,7 +458,6 @@ export default function GrantApplicationView() {
   const hasAttachments = attachments.length > 0;
   const hasDescription = Boolean(application.description?.trim());
   const canGenerateGrant = hasAttachments && hasDescription;
-  const canDeepResearch = canGenerateGrant && !attachments.some(a => a.name === 'deep_research.md');
 
   return (
     <div className="w-4/5 mx-auto py-8 px-4">
@@ -491,10 +490,10 @@ export default function GrantApplicationView() {
               </div>
               <button
                 onClick={handleDeepResearch}
-                disabled={!canDeepResearch || researching}
-                title={!canDeepResearch ? 'Requires description and attachments to generate research' : ''}
+                disabled={!canGenerateGrant || researching}
+                title={!canGenerateGrant ? 'Requires description and attachments to generate research' : ''}
                 className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
-                  canDeepResearch && !researching
+                  canGenerateGrant && !researching
                     ? 'bg-indigo-700 hover:bg-indigo-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-700'
                     : 'bg-gray-400 cursor-not-allowed'
                 }`}

@@ -8,9 +8,9 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
-import { handleError, EdgeFunctionError, ERROR_CODES } from 'errors'
 import { validateUserSession, validateUserAccess } from 'auth'
-import OpenAI from 'openai'
+import { EdgeFunctionError, ERROR_CODES, handleError } from 'errors'
+import { assistantClient, createAssistant, createThread, addMessage, runAssistant, getMessages, type AssistantCreateParams, type Message } from 'openai_assistant'
 
 // Define CORS headers
 const corsHeaders = {
@@ -20,637 +20,454 @@ const corsHeaders = {
   'Access-Control-Max-Age': '86400'
 }
 
+// Create Supabase client
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL') ?? '',
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+);
+
 interface RequestBody {
   application_id: string;
   user_input?: string;
   generate_report?: boolean;
-}
-
-interface ApplicationDocument {
-  id: string
-  file_name: string
-  file_path: string
-}
-
-interface Application {
-  id: string
-  description: string | null
-  grant_application_documents: ApplicationDocument[]
-}
-
-interface ThreadMessage {
-  role: 'user' | 'assistant'
-  content: Array<{
-    type: 'text'
-    text: { value: string }
-  }>
-}
-
-// Add type definitions for message content
-interface MessageContent {
-  type: string;
-  text: {
-    value: string;
+  initialize?: boolean;
+  context?: {
+    description: string;
+    documents: Array<{
+      id: string;
+      vector: number[];
+    }>;
   };
 }
 
-interface FileSegment {
-  path: string;
-  content: string;
+interface HandlerContext {
+  userId: string;
+  body: RequestBody;
 }
 
-export async function handleRequest(req: Request) {
+// Main handler function that processes the validated request
+async function handleRequest(context: HandlerContext): Promise<Response> {
+  const { userId, body } = context;
+  console.log('Processing request for user:', userId);
+
   try {
-    // Handle CORS preflight requests
-    if (req.method === 'OPTIONS') {
-      return new Response('ok', { headers: corsHeaders })
-    }
-
-    // Validate user session and access
-    const authHeader = req.headers.get('authorization')
-    if (!authHeader) {
-      throw new EdgeFunctionError(ERROR_CODES.AUTH_ERROR, 'Missing authorization header')
-    }
-
-    const userId = await validateUserSession(authHeader)
-
-    // Get request JSON
-    const body = await req.json() as RequestBody
-
-    // Validate user has access to this application
-    await validateUserAccess(userId, body.application_id)
-
-    // Create Supabase client
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    )
-
-    // Debug Supabase configuration
-    console.log('[DEBUG] Supabase storage configuration:', {
-      url: Deno.env.get('SUPABASE_URL'),
-      storageUrl: `${Deno.env.get('SUPABASE_URL')}/storage/v1`,
-      bucket: 'grant-attachments',
-      serviceRoleKey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ? 'present' : 'missing',
-      anonKey: Deno.env.get('SUPABASE_ANON_KEY') ? 'present' : 'missing'
-    })
-
-    // Try multiple methods to verify bucket access
-    console.log('[DEBUG] Verifying bucket access...')
-    
-    // Method 1: List buckets with full error details
-    const { data: buckets, error: bucketsError } = await supabaseClient.storage
-      .listBuckets()
-
-    if (bucketsError) {
-      console.error('[DEBUG] Failed to list buckets:', {
-        error: bucketsError,
-        // @ts-ignore - Access error details
-        status: bucketsError?.status,
-        // @ts-ignore - Access error details
-        message: bucketsError?.message,
-        // @ts-ignore - Access error details
-        details: bucketsError?.details
-      })
-    } else {
-      console.log('[DEBUG] Available buckets:', buckets.map(b => ({
-        name: b.name,
-        public: b.public,
-        created_at: b.created_at,
-        id: b.id
-      })))
-    }
-
-    // Method 2: Try to list root of grant-attachments bucket with auth details
-    const { data: rootFiles, error: rootError } = await supabaseClient.storage
-      .from('grant-attachments')
-      .list('', {
-        limit: 1,
-        offset: 0,
-        sortBy: { column: 'name', order: 'asc' }
-      })
-
-    if (rootError) {
-      console.error('[DEBUG] Failed to list grant-attachments bucket:', {
-        error: rootError,
-        // @ts-ignore - Access error details
-        status: rootError?.status,
-        // @ts-ignore - Access error details
-        message: rootError?.message,
-        // @ts-ignore - Access error details
-        details: rootError?.details,
-        // Log auth details
-        auth: {
-          hasAuthHeader: !!supabaseClient.auth.headers,
-          headers: supabaseClient.auth.headers
-        }
-      })
-    } else {
-      console.log('[DEBUG] Grant attachments bucket is accessible, contains:', {
-        fileCount: rootFiles.length,
-        sample: rootFiles.slice(0, 1).map(f => ({
-          name: f.name,
-          type: f.metadata?.mimetype,
-          id: f.id
-        }))
-      })
-    }
-
-    // Method 3: Try to get bucket details
-    const { data: bucketInfo, error: bucketError } = await supabaseClient.storage
-      .getBucket('grant-attachments')
-
-    if (bucketError) {
-      console.error('[DEBUG] Failed to get grant-attachments bucket info:', {
-        error: bucketError,
-        // @ts-ignore - Access error details
-        status: bucketError?.status,
-        // @ts-ignore - Access error details
-        message: bucketError?.message,
-        // @ts-ignore - Access error details
-        details: bucketError?.details
-      })
-    } else {
-      console.log('[DEBUG] Grant attachments bucket info:', {
-        name: bucketInfo.name,
-        public: bucketInfo.public,
-        created_at: bucketInfo.created_at,
-        id: bucketInfo.id
-      })
-    }
-
-    // If all methods fail, we have a serious problem
-    if (bucketsError && rootError && bucketError) {
-      console.error('[DEBUG] All bucket access methods failed')
-      throw new Error('Cannot access storage bucket. Please verify storage configuration and permissions.')
-    }
-
-    // Create OpenAI client
-    const openai = new OpenAI({
-      apiKey: Deno.env.get('OPENAI_API_KEY'),
-      maxRetries: 2,
-      timeout: 120000, // 2 minute timeout
-    })
-
-    // Common request options with v2 header
-    const v2RequestOptions = {
-      headers: {
-        'OpenAI-Beta': 'assistants=v2'
-      }
-    }
-
-    // Debug OpenAI configuration
-    console.log('[DEBUG] OpenAI client configuration:', {
-      baseURL: openai.baseURL,
-      maxRetries: openai.maxRetries,
-      timeout: openai.timeout,
-      defaultHeaders: v2RequestOptions.headers
-    })
-
-    console.log('Fetching application data...')
-    // Get application data
-    const { data: application, error: applicationError } = await supabaseClient
-      .from('grant_applications')
-      .select(`
-        id,
-        description,
-        grant_application_documents (
+    // Initialize research if requested
+    if (body.initialize && body.context) {
+      console.log('Initializing research...');
+      
+      // Get document vectors from database for this application
+      const { data: documents, error: docError } = await supabase
+        .from('grant_application_documents')
+        .select(`
           id,
           file_name,
-          file_path
-        )
-      `)
-      .eq('id', body.application_id)
-      .single()
+          file_type,
+          extracted_text
+        `)
+        .eq('grant_application_id', body.application_id)
+        .order('created_at', { ascending: true });
 
-    if (applicationError) throw applicationError
-    if (!application) throw new Error('Application not found')
-    if (!application.description) throw new Error('Application description is required')
-    if (!application.grant_application_documents?.length) throw new Error('Application must have attachments')
+      if (docError) {
+        throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, 'Failed to fetch documents', docError);
+      }
 
-    console.log('Creating assistant...')
-    // Create or get existing assistant
-    let assistant;
-    let thread;
-    try {
-      assistant = await openai.beta.assistants.create({
+      if (!documents?.length) {
+        throw new EdgeFunctionError(ERROR_CODES.NOT_FOUND, 'No documents found for this application');
+      }
+
+      // Check if we have an existing valid vector store
+      const { data: application, error: appError } = await supabase
+        .from('grant_applications')
+        .select('vector_store_id, vector_store_expires_at')
+        .eq('id', body.application_id)
+        .single();
+
+      if (appError) {
+        throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, 'Failed to fetch application', appError);
+      }
+
+      let vectorStoreId = application.vector_store_id;
+      
+      // Create new vector store if none exists or if expired
+      if (!vectorStoreId || (application.vector_store_expires_at && new Date(application.vector_store_expires_at) <= new Date())) {
+        console.log('Creating new vector store...');
+        const vectorStore = await assistantClient.vectorStores.create({
+          name: `grant-${body.application_id}-vectors`,
+          expires_after: {
+            anchor: "last_active_at",
+            days: 7
+          }
+        });
+
+        // Create OpenAI files from documents
+        console.log('Creating OpenAI files from documents...');
+        const filePromises = documents.map(async (doc) => {
+          const file = await assistantClient.files.create({
+            file: new File(
+              [doc.extracted_text],
+              doc.file_name || `file-${doc.id}.${doc.file_type}`,
+              { type: getMimeType(doc.file_type) }
+            ),
+            purpose: 'assistants'
+          });
+          return file.id;
+        });
+
+        const fileIds = await Promise.all(filePromises);
+        console.log(`Created ${fileIds.length} OpenAI files`);
+
+        // Add files to vector store in batches
+        console.log('Adding files to vector store...');
+        const BATCH_SIZE = 500;
+        for (let i = 0; i < fileIds.length; i += BATCH_SIZE) {
+          const batch = fileIds.slice(i, i + BATCH_SIZE);
+          await assistantClient.vectorStores.fileBatches.createAndPoll(
+            vectorStore.id,
+            { file_ids: batch }
+          );
+        }
+
+        // Store the vector store ID and expiration
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + 7);
+        
+        const { error: updateError } = await supabase
+          .from('grant_applications')
+          .update({
+            vector_store_id: vectorStore.id,
+            vector_store_expires_at: expiresAt.toISOString()
+          })
+          .eq('id', body.application_id);
+
+        if (updateError) {
+          throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, 'Failed to update vector store info', updateError);
+        }
+
+        vectorStoreId = vectorStore.id;
+      }
+
+      // Create assistant
+      console.log('Creating OpenAI assistant...');
+      const assistantParams: AssistantCreateParams = {
         name: "Grant Research Assistant",
         description: "Specialized assistant for grant application research",
         model: Deno.env.get('OPENAI_DEEP_MODEL') ?? 'gpt-4',
         tools: [
           { type: "code_interpreter" },
-          { type: "file_search" }
+          { type: "file_search" },
+          { 
+            type: "function",
+            function: {
+              name: "search_literature",
+              description: "Search scientific literature",
+              parameters: {
+                type: "object",
+                properties: {
+                  query: {
+                    type: "string",
+                    description: "Search query"
+                  }
+                },
+                required: ["query"]
+              }
+            }
+          }
         ],
-        instructions: `You are a specialized research assistant for grant applications. Your task is to:
-1. Analyze the provided grant application description and attachments
-2. Conduct thorough research based on the content
-3. Generate a comprehensive research report in markdown format
-4. Include relevant citations in APA format
-5. Structure the output with clear sections
-6. Include source metadata for validation
-7. Focus on supporting the grant application's goals`
-      });
-    } catch (error) {
-      console.error('Error creating assistant:', error);
-      throw error;
-    }
+        instructions: `You are a specialized research assistant focused on strengthening grant applications through targeted research and specific questions. Your role is to help improve the grant application through critical analysis and specific questions. Important: Do not make up or reference specific papers, authors, or years that you cannot verify.
 
-    console.log('Creating thread...')
-    // Create a thread
-    try {
-      thread = await openai.beta.threads.create();
-    } catch (error) {
-      console.error('Error creating thread:', error);
-      throw error;
-    }
+1. METHODOLOGY ANALYSIS:
+   - Identify gaps in the proposed methodology
+   - Point out missing controls or validations
+   - Request specific details about methods and procedures
+   - Ask about statistical approaches and power analysis
+   - Question how key variables will be measured
 
-    console.log('Processing attachments...')
-    // Download and process attachments
-    const attachmentFiles = []
-    for (const doc of application.grant_application_documents) {
-      // Debug file info
-      console.log('[DEBUG] Processing document:', {
-        id: doc.id,
-        filename: doc.file_name,
-        filepath: doc.file_path
-      })
+2. PRELIMINARY DATA:
+   - Ask about existing data that supports feasibility
+   - Identify which aspects need preliminary validation
+   - Question how preliminary results inform the approach
+   - Ask about pilot studies or proof-of-concept work
 
-      // Normalize the file path
-      const normalizedPath = doc.file_path
-        .split('/')
-        .map((segment: string) => segment.trim())
-        .filter(Boolean)
-        .join('/')
+3. IMPACT AND SIGNIFICANCE:
+   - Challenge assumptions about impact
+   - Ask for specific examples of applications
+   - Question how outcomes will be measured
+   - Probe the broader implications of the work
+   - Ask about potential beneficiaries
 
-      // Create multiple path variants to try
-      const pathVariants = [
-        normalizedPath,
-        encodeURIComponent(normalizedPath),
-        normalizedPath.split('/').map((segment: string) => encodeURIComponent(segment)).join('/'),
-        doc.file_path.replace(/\s+/g, '_'),
-        doc.file_path
-      ]
+4. TECHNICAL APPROACH:
+   - Question the rationale for chosen methods
+   - Ask about alternative approaches considered
+   - Probe for potential technical challenges
+   - Request details about quality control measures
+   - Ask about contingency plans
 
-      console.log('[DEBUG] Path variants:', {
-        original: doc.file_path,
-        normalized: normalizedPath,
-        variants: pathVariants
-      })
+5. RESOURCES AND TIMELINE:
+   - Question the feasibility of timelines
+   - Ask about required facilities and equipment
+   - Probe expertise and personnel needs
+   - Question budget allocation for key activities
 
-      let fileData = null
-      let lastError = null
+6. INTERACTION STYLE:
+   - Focus on one aspect at a time for depth
+   - Ask follow-up questions based on responses
+   - Be specific and concrete in suggestions
+   - Maintain a constructive, collaborative tone
+   - Push for clarity and specificity in responses
 
-      // Try each path variant
-      for (const path of pathVariants) {
-        try {
-          console.log(`[DEBUG] Attempting download with path: ${path}`)
-          const { data, error } = await supabaseClient.storage
-            .from('grant-attachments')
-            .download(path)
+Remember:
+- DO NOT make up or reference papers/authors
+- DO NOT claim knowledge of current trends
+- DO focus on strengthening methodology
+- DO ask specific, targeted questions
+- DO probe for clarity and completeness
+- DO suggest concrete improvements
+- DO maintain focus on the specific aims and objectives`
+      };
 
-          if (error) {
-            console.error('[DEBUG] Download error for path variant:', {
-              path,
-              error,
-              // @ts-ignore - Access error details
-              status: error?.originalError?.status,
-              // @ts-ignore - Access error details
-              statusText: error?.originalError?.statusText,
-              // @ts-ignore - Access error details
-              responseBody: await error?.originalError?.text?.()
-            })
-            lastError = error
-            continue
-          }
-
-          if (data) {
-            fileData = data
-            console.log('[DEBUG] Successfully downloaded file using path:', path)
-            break
-          }
-        } catch (error) {
-          console.error('[DEBUG] Unexpected error for path variant:', {
-            path,
-            error: error instanceof Error ? {
-              name: error.name,
-              message: error.message,
-              stack: error.stack
-            } : 'Unknown error'
-          })
-          lastError = error
-          continue
-        }
-      }
-
-      if (!fileData) {
-        console.error('[DEBUG] All download attempts failed:', {
-          filename: doc.file_name,
-          originalPath: doc.file_path,
-          triedPaths: pathVariants,
-          lastError
-        })
-        throw new Error(`Failed to download file ${doc.file_name} after trying multiple path variants`)
-      }
-
-      // Debug successful download
-      console.log('[DEBUG] File downloaded successfully:', {
-        filename: doc.file_name,
-        size: fileData.size,
-        type: fileData.type
-      })
-
-      // Convert file to text
       try {
-        const fileContent = await fileData.text()
-        console.log('[DEBUG] File content length:', fileContent.length)
-        attachmentFiles.push({
-          content: fileContent,
-          filename: doc.file_name
-        })
-      } catch (error: unknown) {
-        console.error('[DEBUG] File processing error:', {
-          filename: doc.file_name,
-          error: error instanceof Error ? {
-            name: error.name,
-            message: error.message,
-            stack: error.stack
-          } : 'Unknown error'
-        })
-        throw new Error(`Failed to process file ${doc.file_name}: ${error instanceof Error ? error.message : 'Unknown error'}`)
-      }
-    }
-
-    console.log('Uploading files to OpenAI...')
-    // Upload files to thread
-    const files = await Promise.all(
-      attachmentFiles.map(async (file) => {
-        const response = await fetch(
-          'https://api.openai.com/v1/files',
-          {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
-              'Content-Type': 'multipart/form-data'
-            },
-            body: JSON.stringify({
-              file: new File([file.content], file.filename, { type: 'text/plain' }),
-              purpose: 'assistants'
-            })
+        // Create assistant
+        const assistant = await createAssistant(assistantParams);
+        
+        // Configure file_search with the vector store
+        console.log('Configuring assistant with vector store...');
+        await assistantClient.beta.assistants.update(assistant.id, {
+          tool_resources: {
+            file_search: {
+              vector_store_ids: [vectorStoreId]
+            }
           }
-        );
-        return response.json();
-      })
-    );
+        });
 
-    console.log('Creating research request...')
-    // Create message with application description and research request
-    await openai.beta.threads.messages.create(
-      thread.id,
-      {
-        role: 'user',
-        content: `Please conduct research based on this grant application description and attachments:
+        const thread = await createThread();
+
+        // Store thread and assistant IDs
+        console.log('Storing thread and assistant IDs...');
+        const { error: updateError } = await supabase
+          .from('grant_applications')
+          .update({
+            openai_thread_id: thread.id,
+            research_assistant_id: assistant.id,
+            research_status: 'in_progress',
+            deep_research_prompt: body.context.description,
+            deep_research_model: assistant.model
+          })
+          .eq('id', body.application_id);
+
+        if (updateError) {
+          throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, 'Failed to update application', updateError);
+        }
+
+        // Send initial message and run assistant
+        const initialMessage = `Please analyze this grant application and provide insights and questions.
 
 Description:
-${application.description}
+${body.context.description}`;
 
-Requirements:
-1. Generate a comprehensive research report
-2. Use APA format for citations
-3. Include source metadata
-4. Focus on supporting the grant application
-5. Structure the output in markdown format`
-      },
-      v2RequestOptions
-    )
-
-    console.log('Running assistant...')
-    // Run the assistant
-    const run = await openai.beta.threads.runs.create(
-      thread.id,
-      {
-        assistant_id: assistant.id
-      },
-      v2RequestOptions
-    )
-
-    console.log('Waiting for completion...')
-    // Poll for completion
-    let completedRun
-    while (true) {
-      const runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id)
-      console.log('Run status:', runStatus.status)
-      
-      if (runStatus.status === 'completed') {
-        completedRun = runStatus
-        break
-      } else if (runStatus.status === 'failed') {
-        console.error('Run failed:', runStatus.last_error)
-        throw new Error(`Research generation failed: ${runStatus.last_error?.message}`)
-      } else if (runStatus.status === 'expired') {
-        throw new Error('Research generation timed out')
-      }
-      // Wait 1 second before polling again
-      await new Promise(resolve => setTimeout(resolve, 1000))
-    }
-
-    console.log('Retrieving research content...')
-    // Get the assistant's response
-    const messages = await openai.beta.threads.messages.list(thread.id)
-    const researchContent = messages.data
-      .filter((msg) => msg.role === 'assistant')
-      .map((msg) => msg.content)
-      .flat()
-      .filter((content: any) => content.type === 'text')
-      .map((content: any) => content.text.value)
-      .join('\n\n')
-
-    if (!researchContent) {
-      throw new Error('No research content generated')
-    }
-
-    console.log('Saving research output...')
-    // Save research output
-    const researchFileName = 'deep_research.md'
-    const researchFilePath = `${body.application_id}/${crypto.randomUUID()}-${researchFileName}`
-
-    // Upload to storage
-    const { error: uploadError } = await supabaseClient.storage
-      .from('grant-attachments')
-      .upload(researchFilePath, researchContent)
-
-    if (uploadError) {
-      console.error('Error uploading research:', uploadError)
-      throw uploadError
-    }
-
-    // Create document record
-    const { error: documentError } = await supabaseClient
-      .from('grant_application_documents')
-      .insert({
-        grant_application_id: body.application_id,
-        file_name: researchFileName,
-        file_type: 'md',
-        file_path: researchFilePath
-      })
-
-    if (documentError) {
-      console.error('Error creating document record:', documentError)
-      throw documentError
-    }
-
-    // Update application with prompt and model
-    const { error: updateError } = await supabaseClient
-      .from('grant_applications')
-      .update({
-        deep_research_prompt: application.description,
-        deep_research_model: assistant.model
-      })
-      .eq('id', body.application_id)
-
-    if (updateError) {
-      console.error('Error updating application:', updateError)
-      throw updateError
-    }
-
-    console.log('Research generation completed successfully')
-
-    if (body.generate_report) {
-      // Generate final report
-      return new Response(
-        JSON.stringify({
-          success: true,
-          message: 'Research generated successfully',
-          assistant_id: assistant.id,
-          thread_id: thread.id
-        }),
-        {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 200,
-        }
-      )
-    } else {
-      // Handle interactive research
-      if (body.user_input) {
-        // Save user input
-        const { error: inputError } = await supabaseClient
-          .from('grant_application_deep_research')
-          .insert({
-            grant_application_id: body.application_id,
-            interaction_type: 'user_response',
-            content: { text: body.user_input },
-            parent_id: null // TODO: Track conversation thread
-          });
-
-        if (inputError) throw inputError;
-
-        // Send user input to assistant
-        await openai.beta.threads.messages.create(
-          thread.id,
-          {
-            role: 'user',
-            content: body.user_input
-          }
-        );
-
-        // Run the assistant
-        const run = await openai.beta.threads.runs.create(
-          thread.id,
-          { assistant_id: assistant.id }
-        );
-
-        // Wait for completion
-        let completedRun;
-        while (true) {
-          const runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
-          if (runStatus.status === 'completed') {
-            completedRun = runStatus;
-            break;
-          } else if (runStatus.status === 'failed') {
-            throw new Error(`Research generation failed: ${runStatus.last_error?.message}`);
-          } else if (runStatus.status === 'expired') {
-            throw new Error('Research generation timed out');
-          }
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
+        await addMessage(thread.id, initialMessage);
+        await runAssistant(thread.id, assistant.id);
 
         // Get assistant's response
-        const messages = await openai.beta.threads.messages.list(thread.id);
-        const aiResponse = messages.data
-          .filter((msg) => msg.role === 'assistant')
-          .map((msg) => msg.content as MessageContent[])
-          .flat()
-          .filter((content) => content.type === 'text')
-          .map((content) => content.text.value)
-          .join('\n\n');
+        const messages = await getMessages(thread.id, { limit: 1, order: 'desc' });
+        const assistantMessage = messages.find((m: Message) => m.role === 'assistant');
+        
+        if (assistantMessage && assistantMessage.content[0].type === 'text') {
+          const response = assistantMessage.content[0].text.value;
+          
+          // Store interaction
+          console.log('Storing interaction...');
+          const { error: insertError } = await supabase
+            .from('grant_application_deep_research')
+            .insert({
+              grant_application_id: body.application_id,
+              content: response,
+              interaction_type: 'ai_output',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
 
-        // Save AI response
-        const { error: responseError } = await supabaseClient
-          .from('grant_application_deep_research')
-          .insert({
-            grant_application_id: body.application_id,
-            interaction_type: 'ai_response',
-            content: { text: aiResponse },
-            parent_id: null // TODO: Track conversation thread
-          });
-
-        if (responseError) throw responseError;
-
-        // Return success
-        return new Response(
-          JSON.stringify({
-            success: true,
-            message: 'Research interaction processed successfully'
-          }),
-          {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 200
+          if (insertError) {
+            throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, 'Failed to store interaction', insertError);
           }
-        );
-      }
 
-      // Return success
-      return new Response(
-        JSON.stringify({
-          success: true,
-          message: 'Research interaction processed successfully'
-        }),
-        {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 200
+          return new Response(
+            JSON.stringify({
+              success: true,
+              message: 'Research generated successfully',
+              assistant_id: assistant.id,
+              thread_id: thread.id
+            }),
+            {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              status: 200
+            }
+          );
+        } else {
+          throw new EdgeFunctionError(ERROR_CODES.AI_ERROR, 'No valid response from assistant');
         }
-      );
+      } catch (error) {
+        console.error('Error during research initialization:', error);
+        throw error;
+      }
     }
 
-  } catch (error: unknown) {
-    console.error('Error in deep-research function:', error)
+    // Handle interactive research
+    if (!body.initialize) {
+      console.log('Processing interactive research');
+
+      // Get application data
+      const { data: appData, error: appError } = await supabase
+        .from('grant_applications')
+        .select('openai_thread_id, research_assistant_id')
+        .eq('id', body.application_id)
+        .single();
+
+      if (appError) {
+        throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, 'Failed to get application data', appError);
+      }
+
+      if (!appData.openai_thread_id || !appData.research_assistant_id) {
+        throw new EdgeFunctionError(ERROR_CODES.INVALID_INPUT, 'Research not initialized');
+      }
+
+      // Get the latest interaction
+      const { data: latestInteraction, error: interactionError } = await supabase
+        .from('grant_application_deep_research')
+        .select('*')
+        .eq('grant_application_id', body.application_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (interactionError) {
+        throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, 'Failed to get latest interaction', interactionError);
+      }
+
+      if (latestInteraction.interaction_type !== 'user_response') {
+        throw new EdgeFunctionError(ERROR_CODES.INVALID_INPUT, 'Latest interaction must be a user response');
+      }
+
+      try {
+        // Send user's message to the thread
+        await addMessage(appData.openai_thread_id, latestInteraction.content);
+        
+        // Run the assistant
+        await runAssistant(appData.openai_thread_id, appData.research_assistant_id);
+
+        // Get assistant's response
+        const messages = await getMessages(appData.openai_thread_id, { limit: 1, order: 'desc' });
+        const assistantMessage = messages.find((m: Message) => m.role === 'assistant');
+        
+        if (assistantMessage && assistantMessage.content[0].type === 'text') {
+          const response = assistantMessage.content[0].text.value;
+          
+          // Store new interaction
+          console.log('Storing new interaction...');
+          const { error: insertError } = await supabase
+            .from('grant_application_deep_research')
+            .insert({
+              grant_application_id: body.application_id,
+              content: response,
+              interaction_type: 'ai_response',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+
+          if (insertError) {
+            throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, 'Failed to store interaction', insertError);
+          }
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              message: 'Research response generated successfully'
+            }),
+            {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              status: 200
+            }
+          );
+        } else {
+          throw new EdgeFunctionError(ERROR_CODES.AI_ERROR, 'No valid response from assistant');
+        }
+      } catch (error) {
+        console.error('Error during interactive research:', error);
+        throw error;
+      }
+    }
+
     return new Response(
       JSON.stringify({
-        success: false,
-        error: error instanceof Error ? error.message : 'An unknown error occurred'
+        success: true,
+        message: 'No action required'
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 500,
+        status: 200
       }
-    )
+    );
+
+  } catch (error) {
+    console.error('Error in deep-research function:', error);
+    return handleError(error, { headers: corsHeaders });
   }
 }
 
-// Use Deno.serve instead of exporting
+// Main entry point
 Deno.serve(async (req) => {
-  try {
-    return await handleRequest(req)
-  } catch (error) {
-    console.error('Server error:', error)
-    return new Response(
-      JSON.stringify({
-        success: false,
-        error: error instanceof Error ? error.message : 'An unknown error occurred'
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 500,
-      }
-    )
+  console.log('Received request:', req.method, req.url);
+  
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
   }
-}) 
+
+  try {
+    // Validate request method
+    if (req.method !== 'POST') {
+      throw new EdgeFunctionError(ERROR_CODES.INVALID_INPUT, 'Method not allowed');
+    }
+
+    // Get auth header
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      throw new EdgeFunctionError(ERROR_CODES.AUTH_ERROR, 'No authorization header');
+    }
+
+    // Parse request body - do this ONCE
+    console.log('Parsing request body...');
+    const body: RequestBody = await req.json();
+    console.log('Request body:', {
+      applicationId: body.application_id,
+      initialize: body.initialize,
+      hasContext: !!body.context
+    });
+
+    if (!body.application_id) {
+      throw new EdgeFunctionError(ERROR_CODES.INVALID_INPUT, 'No application ID provided');
+    }
+
+    // Validate user session and access
+    const userId = await validateUserSession(authHeader);
+    await validateUserAccess(userId, body.application_id);
+
+    // Process the request with validated data
+    return await handleRequest({ userId, body });
+
+  } catch (error) {
+    console.error('Error in deep-research function:', error);
+    return handleError(error, { headers: corsHeaders });
+  }
+});
+
+// Helper function to get MIME type
+function getMimeType(fileType: string): string {
+  const mimeTypes: Record<string, string> = {
+    'pdf': 'application/pdf',
+    'md': 'text/markdown',
+    'txt': 'text/plain',
+    'doc': 'application/msword',
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  };
+  return mimeTypes[fileType] || 'text/plain';
+} 

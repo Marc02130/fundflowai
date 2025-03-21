@@ -5,16 +5,15 @@ CREATE TYPE interaction_type AS ENUM ('ai_output', 'user_response', 'ai_response
 CREATE TABLE IF NOT EXISTS grant_application_deep_research (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   grant_application_id UUID NOT NULL REFERENCES grant_applications(id) ON DELETE CASCADE,
-  interaction_type interaction_type NOT NULL,
-  content JSONB NOT NULL,
-  parent_id UUID REFERENCES grant_application_deep_research(id),
+  interaction_type interaction_type NOT NULL DEFAULT 'ai_output',
+  content text NOT NULL,
+  has_generated_report boolean not null default false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Add indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_deep_research_grant_app_id ON grant_application_deep_research(grant_application_id);
-CREATE INDEX IF NOT EXISTS idx_deep_research_parent_id ON grant_application_deep_research(parent_id);
 CREATE INDEX IF NOT EXISTS idx_deep_research_created_at ON grant_application_deep_research(created_at DESC);
 
 -- Add RLS policies
