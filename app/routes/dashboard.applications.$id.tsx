@@ -182,6 +182,8 @@ export default function GrantApplicationView() {
     
     try {
       setUpdating(true);
+      
+      // 1. First update the application status in the database
       const { error: updateError } = await supabase
         .from('grant_applications')
         .update({ status: newStatus })
@@ -189,7 +191,47 @@ export default function GrantApplicationView() {
 
       if (updateError) throw updateError;
 
-      // Update local state
+      // 2. Clean up OpenAI resources (assistants and vector store)
+      try {
+        console.log(`Cleaning up OpenAI resources for application ${application.id}...`);
+        
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          console.error('No active session found for cleanup');
+          // Continue with application status update even if cleanup fails
+        } else {
+          // Call the destroy-grant-assistants edge function
+          const response = await fetch(
+            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/destroy-grant-assistants`,
+            {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${session.access_token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                grant_application_id: application.id
+              })
+            }
+          );
+          
+          if (!response.ok) {
+            const errorData = await response.json();
+            console.error('Failed to clean up OpenAI resources:', errorData);
+            // Continue with application status update even if cleanup fails
+          } else {
+            const result = await response.json();
+            console.log('OpenAI resources cleaned up successfully:', result);
+            console.log(`Deleted assistants: ${result.deleted_assistants}`);
+            console.log(`Vector store deleted: ${result.vector_store_deleted}`);
+          }
+        }
+      } catch (cleanupError) {
+        console.error('Error cleaning up OpenAI resources:', cleanupError);
+        // Continue with application status update even if cleanup fails
+      }
+
+      // 3. Update local state and navigate regardless of cleanup success
       setApplication(prev => prev ? { ...prev, status: newStatus } : null);
 
       // Navigate back to dashboard for both cancel and submit
@@ -399,7 +441,18 @@ export default function GrantApplicationView() {
       if (sectionsError) throw sectionsError;
 
       // Transform and update sections
-      const transformedSections = updatedSections?.map(section => ({
+      // Note: Explicitly type the data to fix TypeScript errors
+      type SectionWithData = {
+        id: string;
+        is_completed: boolean;
+        flow_order: number;
+        grant_sections: {
+          name: string;
+          description: string | null;
+        };
+      };
+
+      const transformedSections = (updatedSections as unknown as SectionWithData[])?.map(section => ({
         id: section.id,
         name: section.grant_sections.name,
         description: section.grant_sections.description,

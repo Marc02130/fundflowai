@@ -1,0 +1,18 @@
+{
+  "tasks": {
+    "start": "deno run --allow-net --allow-env --allow-read index.ts",
+    "deploy": "cd ../.. && supabase functions deploy create-grant-assistant"
+  },
+  "imports": {
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.7",
+    "openai": "https://esm.sh/openai@4.89.0",
+    "errors": "../shared/errors.ts",
+    "openai_assistant": "../shared/openai_assistant.ts",
+    "auth": "../shared/auth.ts"
+  },
+  "compilerOptions": {
+    "allowJs": true,
+    "lib": ["deno.window"],
+    "strict": true
+  }
+} 

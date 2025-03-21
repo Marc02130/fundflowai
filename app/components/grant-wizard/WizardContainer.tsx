@@ -8,6 +8,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import React from 'react';
+import { supabase } from '../../lib/supabase';
 
 /**
  * Defines the structure of each wizard step
@@ -22,7 +23,7 @@ interface WizardStep {
  */
 interface WizardContainerProps {
   steps: WizardStep[];
-  onComplete: (data: any) => void;
+  onComplete: (data: any) => Promise<string>; // Returns application ID
 }
 
 // Local storage key for persisting wizard state
@@ -122,7 +123,73 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
    */
   const handleComplete = async (finalData: any) => {
     try {
-      await onComplete(finalData);
+      // First call the onComplete callback provided by parent component
+      // This should create the grant application and return the new ID
+      const newApplicationId = await onComplete(finalData);
+      
+      // Now create the specialized assistants for this grant application
+      console.log('Creating specialized assistants for grant application:', newApplicationId);
+      
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          console.error('No active session found');
+          return;
+        }
+        
+        // Validate required fields
+        if (!newApplicationId) {
+          console.error('Missing grant_application_id - cannot create assistants');
+          return;
+        }
+        
+        if (!finalData.grant_type_id) {
+          console.error('Missing grant_type_id - cannot create assistants');
+          return;
+        }
+        
+        // Log the data being sent
+        const requestData = {
+          grant_application_id: newApplicationId,
+          grant_type_id: finalData.grant_type_id,
+          description: finalData.description || ''
+        };
+        
+        console.log('Sending assistant creation request with data:', requestData);
+        
+        // Call the create-grant-assistant edge function with the new ID
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-grant-assistant`,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestData)
+          }
+        );
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error('Failed to create assistants:', errorData);
+          // Continue execution despite assistant creation failure
+        } else {
+          const result = await response.json();
+          console.log('Assistants created successfully:', result);
+          // Log each assistant ID for verification
+          console.log(`Research Assistant ID: ${result.research_assistant_id}`);
+          console.log(`Writing Assistant ID: ${result.writing_assistant_id}`);
+          console.log(`Review Assistant ID: ${result.review_assistant_id}`);
+          console.log(`Shared Thread ID: ${result.openai_thread_id}`);
+          console.log(`Shared Vector Store ID: ${result.vector_store_id}`);
+        }
+      } catch (assistantError) {
+        console.error('Error creating assistants:', assistantError);
+        // Continue execution despite assistant creation failure
+      }
+      
+      // Clean up wizard state regardless of assistant creation success
       localStorage.removeItem(WIZARD_STATE_KEY);
     } catch (error) {
       console.error('Error completing wizard:', error);

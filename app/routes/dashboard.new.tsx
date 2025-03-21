@@ -23,7 +23,7 @@ export default function NewGrantApplication() {
   const [wizardData, setWizardData] = useState<WizardData>({});
   const [error, setError] = useState<string | null>(null);
 
-  const handleComplete = useCallback(async (data: WizardData) => {
+  const handleComplete = useCallback(async (data: WizardData): Promise<string> => {
     let sectionsToCreate;
     // Move finalData declaration outside try block for catch block access
     const selectedSections = data.selectedSections || wizardData.selectedSections;
@@ -140,8 +140,32 @@ export default function NewGrantApplication() {
         throw createSectionsError;
       }
 
+      // Create grant assistants
+      const response = await fetch('/functions/v1/create-grant-assistant', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+        },
+        body: JSON.stringify({
+          applicationId: application.id,
+          userId: user.id,
+          organizationId: finalData.organizationId,
+          opportunityId: finalData.opportunityId,
+          grantTypeId: finalData.grantTypeId,
+          title: finalData.title
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Failed to create assistants:', errorData);
+        // Continue with navigation even if assistant creation fails
+      }
+
       // Navigate to the application view
       navigate(`/dashboard/applications/${application.id}`);
+      return application.id;
     } catch (err) {
       console.error('Error creating application:', {
         error: err,
@@ -150,6 +174,7 @@ export default function NewGrantApplication() {
         sections: sectionsToCreate
       });
       setError('Failed to create application');
+      throw err;
     }
   }, [navigate, wizardData]);
 

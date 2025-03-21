@@ -277,4 +277,67 @@ export async function uploadFilesToAssistant(
       `Failed to upload files: ${error instanceof Error ? error.message : String(error)}`
     );
   }
+}
+
+/**
+ * Deletes an assistant.
+ * @param {string} assistantId - ID of the assistant to delete
+ * @returns {Promise<boolean>} True if deletion was successful
+ * @throws {EdgeFunctionError} If assistant deletion fails
+ */
+export async function deleteAssistant(assistantId: string) {
+  try {
+    console.log(`Deleting assistant ${assistantId}`);
+    await assistantClient.beta.assistants.del(assistantId);
+    console.log('Assistant deleted successfully');
+    return true;
+  } catch (error) {
+    console.error('Assistant deletion error:', error);
+    throw new EdgeFunctionError(
+      ERROR_CODES.AI_ERROR,
+      `Failed to delete assistant: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+/**
+ * Deletes a vector store.
+ * @param {string} vectorStoreId - ID of the vector store to delete
+ * @returns {Promise<boolean>} True if deletion was successful
+ * @throws {EdgeFunctionError} If vector store deletion fails
+ */
+export async function deleteVectorStore(vectorStoreId: string) {
+  try {
+    console.log(`Deleting vector store ${vectorStoreId}`);
+    await assistantClient.vectorStores.del(vectorStoreId);
+    console.log('Vector store deleted successfully');
+    return true;
+  } catch (error) {
+    console.error('Vector store deletion error:', error);
+    throw new EdgeFunctionError(
+      ERROR_CODES.AI_ERROR,
+      `Failed to delete vector store: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+/**
+ * Deletes a thread.
+ * @param {string} threadId - ID of the thread to delete
+ * @returns {Promise<boolean>} True if deletion was successful
+ * @throws {EdgeFunctionError} If thread deletion fails
+ */
+export async function deleteThread(threadId: string) {
+  try {
+    console.log(`Deleting thread ${threadId}`);
+    await assistantClient.beta.threads.del(threadId);
+    console.log('Thread deleted successfully');
+    return true;
+  } catch (error) {
+    console.error('Thread deletion error:', error);
+    throw new EdgeFunctionError(
+      ERROR_CODES.AI_ERROR,
+      `Failed to delete thread: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 } 
