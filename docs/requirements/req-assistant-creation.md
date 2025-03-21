@@ -24,7 +24,7 @@
 ### Implementation Details
 - Edge Function:
   - Accept grant_application_id, grant_type_id, and description as parameters
-  - Create three specialized OpenAI assistants with appropriate model (e.g., gpt-4o):
+  - Create three specialized OpenAI assistants with a compatible model for file_search tool (use OPENAI_MODEL environment variable set to gpt-4o):
     - Research Assistant: For deep research and critical analysis
     - Writing Assistant: For content generation and writing help  
     - Review Assistant: For reviewing and improving content
@@ -77,3 +77,12 @@ interface CreateAssistantResponse {
 - Implement RLS policies for accessing assistant and vector store IDs
 - Use service role key for OpenAI API calls within the edge function
 - Add appropriate validation and cleaning when switching between assistants on the same thread
+
+### OpenAI Model Compatibility
+- The assistants MUST use a model compatible with the file_search tool
+- Compatible models include:
+  - gpt-4o (recommended)
+  - gpt-4-turbo-preview
+  - gpt-3.5-turbo
+- Using an incompatible model will cause assistant creation to fail
+- Use environment variable OPENAI_MODEL to control model selection instead of hardcoding
