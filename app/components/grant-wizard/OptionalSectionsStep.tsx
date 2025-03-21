@@ -13,7 +13,7 @@
  * - Validation of selections
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '~/lib/supabase';
 
 /**
@@ -45,6 +45,8 @@ export default function OptionalSectionsStep({ onNext, onSave, initialData }: Op
   const [selectedSections, setSelectedSections] = useState<string[]>(initialData?.selectedSections || []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const previousSelectionsRef = useRef<string[]>(initialData?.selectedSections || []);
+  const isInitialRenderRef = useRef(true);
 
   // Fetch optional sections for the organization
   useEffect(() => {
@@ -92,14 +94,21 @@ export default function OptionalSectionsStep({ onNext, onSave, initialData }: Op
 
   const toggleSection = (sectionId: string) => {
     console.log('OptionalSectionsStep - toggleSection - before:', { sectionId, currentSelected: selectedSections });
-    setSelectedSections(prev => {
-      const newSelections = prev.includes(sectionId)
-        ? prev.filter(id => id !== sectionId)
-        : [...prev, sectionId];
-      console.log('OptionalSectionsStep - toggleSection - after:', newSelections);
+    
+    // First update local state without calling onSave
+    const newSelections = selectedSections.includes(sectionId)
+      ? selectedSections.filter(id => id !== sectionId)
+      : [...selectedSections, sectionId];
+    
+    console.log('OptionalSectionsStep - toggleSection - after:', newSelections);
+    
+    // Update state first
+    setSelectedSections(newSelections);
+    
+    // Then schedule onSave to run after the render cycle completes using setTimeout
+    setTimeout(() => {
       onSave({ selectedSections: newSelections });
-      return newSelections;
-    });
+    }, 0);
   };
 
   // Expose state values for the parent component

@@ -141,21 +141,21 @@ export default function NewGrantApplication() {
       }
 
       // Create grant assistants
-      const response = await fetch('/functions/v1/create-grant-assistant', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
-        },
-        body: JSON.stringify({
-          applicationId: application.id,
-          userId: user.id,
-          organizationId: finalData.organizationId,
-          opportunityId: finalData.opportunityId,
-          grantTypeId: finalData.grantTypeId,
-          title: finalData.title
-        })
-      });
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-grant-assistant`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+          },
+          body: JSON.stringify({
+            grant_application_id: application.id,
+            grant_type_id: finalData.grantTypeId,
+            description: finalData.description || ''
+          })
+        }
+      );
 
       if (!response.ok) {
         const errorData = await response.json();

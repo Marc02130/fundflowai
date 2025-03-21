@@ -182,6 +182,7 @@ export default function GrantApplicationView() {
     
     try {
       setUpdating(true);
+      console.log(`Starting ${newStatus} process for application:`, application.id);
       
       // 1. First update the application status in the database
       const { error: updateError } = await supabase
@@ -190,6 +191,7 @@ export default function GrantApplicationView() {
         .eq('id', application.id);
 
       if (updateError) throw updateError;
+      console.log(`Status updated to ${newStatus} in database`);
 
       // 2. Clean up OpenAI resources (assistants and vector store)
       try {
@@ -200,7 +202,17 @@ export default function GrantApplicationView() {
           console.error('No active session found for cleanup');
           // Continue with application status update even if cleanup fails
         } else {
+          console.log('User session found, proceeding with cleanup');
+          console.log('Session user ID:', session.user.id);
+          
+          // Prepare request payload
+          const payload = {
+            grant_application_id: application.id
+          };
+          console.log('Request payload:', payload);
+          
           // Call the destroy-grant-assistants edge function
+          console.log('Calling destroy-grant-assistants edge function...');
           const response = await fetch(
             `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/destroy-grant-assistants`,
             {
@@ -209,15 +221,17 @@ export default function GrantApplicationView() {
                 'Authorization': `Bearer ${session.access_token}`,
                 'Content-Type': 'application/json'
               },
-              body: JSON.stringify({
-                grant_application_id: application.id
-              })
+              body: JSON.stringify(payload)
             }
           );
+          
+          console.log('Response status:', response.status);
           
           if (!response.ok) {
             const errorData = await response.json();
             console.error('Failed to clean up OpenAI resources:', errorData);
+            console.error('Response status:', response.status);
+            console.error('Response status text:', response.statusText);
             // Continue with application status update even if cleanup fails
           } else {
             const result = await response.json();

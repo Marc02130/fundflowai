@@ -49,21 +49,19 @@ interface HandlerContext {
 async function handleRequest(context: HandlerContext): Promise<Response> {
   const { userId, body } = context;
   console.log('Processing destroy assistants request for user:', userId);
+  console.log('Request body:', JSON.stringify(body));
 
   try {
     const { grant_application_id } = body;
-    
-    // Validate that the user has access to this grant application
-    const hasAccess = await validateUserAccess(userId, grant_application_id);
-    if (!hasAccess) {
-      throw new EdgeFunctionError(ERROR_CODES.NOT_FOUND, 'Grant application not found or access denied');
-    }
+    console.log('Grant application ID:', grant_application_id);
     
     let deletedAssistants = 0;
     let deletedThreads = 0;
     let vectorStoreDeleted = false;
 
     // Retrieve assistant IDs, thread IDs, and vector store ID from the database
+    console.log(`Fetching application with ID: ${grant_application_id} for user: ${userId}`);
+    
     const { data: application, error: appError } = await supabase
       .from('grant_applications')
       .select(`
@@ -71,18 +69,26 @@ async function handleRequest(context: HandlerContext): Promise<Response> {
         writing_assistant_id,
         review_assistant_id,
         vector_store_id,
-        openai_thread_id,
-        deep_research_thread_id
+        openai_thread_id
       `)
       .eq('id', grant_application_id)
       .eq('user_id', userId)
       .single();
 
+    console.log('Query result:', application ? 'Found application' : 'No application found');
+    console.log('Query error:', appError ? JSON.stringify(appError) : 'No error');
+
     if (appError) {
+      console.error('Application fetch error details:', {
+        message: appError.message,
+        details: appError.details,
+        hint: appError.hint,
+        code: appError.code
+      });
       throw new EdgeFunctionError(ERROR_CODES.NOT_FOUND, 'Grant application not found or access denied');
     }
 
-    console.log('Retrieved application data:', application);
+    console.log('Retrieved application data:', JSON.stringify(application));
 
     // Delete research assistant if exists
     if (application.research_assistant_id) {
@@ -136,19 +142,6 @@ async function handleRequest(context: HandlerContext): Promise<Response> {
       }
     }
 
-    // Delete deep research thread if exists
-    if (application.deep_research_thread_id) {
-      try {
-        console.log(`Deleting deep research thread: ${application.deep_research_thread_id}`);
-        await deleteThread(application.deep_research_thread_id);
-        deletedThreads++;
-        console.log('Deep research thread deleted successfully');
-      } catch (threadError) {
-        console.error('Error deleting deep research thread:', threadError);
-        // Continue with other deletions even if this one fails
-      }
-    }
-
     // Delete vector store if exists
     if (application.vector_store_id) {
       try {
@@ -171,8 +164,7 @@ async function handleRequest(context: HandlerContext): Promise<Response> {
         review_assistant_id: null,
         vector_store_id: null,
         vector_store_expires_at: null,
-        openai_thread_id: null,
-        deep_research_thread_id: null
+        openai_thread_id: null
       })
       .eq('id', grant_application_id);
 

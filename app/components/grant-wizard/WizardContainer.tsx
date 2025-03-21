@@ -143,15 +143,15 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
           return;
         }
         
-        if (!finalData.grant_type_id) {
-          console.error('Missing grant_type_id - cannot create assistants');
+        if (!finalData.grantTypeId) {
+          console.error('Missing grantTypeId - cannot create assistants');
           return;
         }
         
         // Log the data being sent
         const requestData = {
           grant_application_id: newApplicationId,
-          grant_type_id: finalData.grant_type_id,
+          grant_type_id: finalData.grantTypeId,
           description: finalData.description || ''
         };
         
