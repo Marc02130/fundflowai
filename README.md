@@ -16,6 +16,10 @@ Fund Flow AI streamlines the grant application process using AI assistance for c
 - 🔄 Real-time updates
 - 📱 Responsive design
 - 🎨 Modern UI with TailwindCSS
+- 🔧 Administrative tools:
+  - Grant section management
+  - User profile administration
+  - Organization management
 
 ## Tech Stack
 
@@ -67,6 +71,11 @@ npm run dev
 # or
 pnpm dev
 ```
+
+The application will be available at http://localhost:5173. Admin functionality is accessible via:
+- `/dashboard/admin/sections` - Manage grant sections
+- `/dashboard/admin/users` - Manage user profiles
+- `/dashboard/admin/organizations` - Manage organizations
 
 ## Supabase Setup
 
@@ -157,6 +166,7 @@ Configure in Amplify Console:
 - Configure proper CORS settings
 - Set up proper IAM roles
 - Enable audit logging
+- Implement role-based access for admin functionality
 
 ### Performance
 - Configure caching rules

@@ -264,7 +264,7 @@ export default function ResearchWindow() {
                 <div className="h-4 bg-gray-200 rounded w-1/2 mx-auto"></div>
               </div>
               <div className="mt-6 text-gray-600">
-                <p className="text-lg font-medium mb-2">Initializing Deep Research</p>
+                <p className="text-lg font-medium mb-2">Initializing Research Assistant</p>
                 <p className="text-sm">Please wait while we analyze your application and generate initial insights. This may take a few moments.</p>
               </div>
               <div className="mt-6">

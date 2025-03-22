@@ -20,7 +20,7 @@ export default function DashboardHome() {
           <ul className="space-y-2 text-gray-600">
             <li className="flex items-start">
               <span className="text-blue-500 mr-2">🔍</span>
-              <span><strong>Research Assistant</strong> – Your devil's advocate (in a good way). Always looking for weaknesses and helps strengthen your grant with relevant questions and information</span>
+              <span><strong>Research Assistant</strong> – Your thoughtful inquiry companion, using the Socratic method to guide your grant development. Through targeted questions and relevant insights, we help you strengthen your proposal at every step. Generate a comprehensive summary of your progress whenever you need it.</span>
             </li>
             <li className="flex items-start">
               <span className="text-blue-500 mr-2">✍️</span>

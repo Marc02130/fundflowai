@@ -141,26 +141,67 @@ export default function NewGrantApplication() {
       }
 
       // Create grant assistants
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-grant-assistant`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
-          },
-          body: JSON.stringify({
-            grant_application_id: application.id,
-            grant_type_id: finalData.grantTypeId,
-            description: finalData.description || ''
-          })
-        }
-      );
+      let assistantData = null;
+      try {
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-grant-assistant`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+            },
+            body: JSON.stringify({
+              grant_application_id: application.id,
+              grant_type_id: finalData.grantTypeId,
+              description: finalData.description || ''
+            })
+          }
+        );
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('Failed to create assistants:', errorData);
-        // Continue with navigation even if assistant creation fails
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error('Failed to create assistants:', errorData);
+          // Continue with navigation even if assistant creation fails
+        } else {
+          assistantData = await response.json();
+          console.log('Assistants created successfully:', assistantData);
+        }
+      } catch (assistantError) {
+        console.error('Error creating assistants:', assistantError);
+        // Continue even if there was an error
+      }
+      
+      // Call vectorize-grant-requirements to fetch and process requirement documents
+      try {
+        const vectorStoreId = assistantData?.vector_store_id;
+        
+        const vectorizeResponse = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/vectorize-grant-requirements`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+            },
+            body: JSON.stringify({
+              grant_application_id: application.id,
+              vector_store_id: vectorStoreId
+            })
+          }
+        );
+        
+        if (!vectorizeResponse.ok) {
+          const errorData = await vectorizeResponse.json();
+          console.error('Failed to vectorize requirements:', errorData);
+          // Non-blocking - continue even if this fails
+        } else {
+          const vectorizeResult = await vectorizeResponse.json();
+          console.log('Requirements vectorization successful:', vectorizeResult);
+        }
+      } catch (vectorizeError) {
+        console.error('Error vectorizing requirements:', vectorizeError);
+        // Non-blocking - continue even if this fails
       }
 
       // Navigate to the application view

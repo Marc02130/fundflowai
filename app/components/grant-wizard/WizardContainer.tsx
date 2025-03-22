@@ -56,6 +56,9 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
     }
     return {};
   });
+  
+  // Add loading state
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   /**
    * Persists wizard state to localStorage whenever
@@ -104,6 +107,7 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
         const stepData = await stepState.handleNext();
         if (currentStep === steps.length - 1) {
           console.log('Completing wizard');
+          setIsSubmitting(true); // Set loading state when starting final submission
           const finalData = { ...formData, ...stepData };
           await handleComplete(finalData);
         } else {
@@ -112,6 +116,7 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
         }
       } catch (error) {
         console.error('Error in handleNext:', error);
+        setIsSubmitting(false); // Reset loading state on error
       }
     }
   };
@@ -134,17 +139,20 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
           console.error('No active session found');
+          setIsSubmitting(false); // Reset loading state
           return;
         }
         
         // Validate required fields
         if (!newApplicationId) {
           console.error('Missing grant_application_id - cannot create assistants');
+          setIsSubmitting(false); // Reset loading state
           return;
         }
         
         if (!finalData.grantTypeId) {
           console.error('Missing grantTypeId - cannot create assistants');
+          setIsSubmitting(false); // Reset loading state
           return;
         }
         
@@ -183,6 +191,37 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
           console.log(`Review Assistant ID: ${result.review_assistant_id}`);
           console.log(`Shared Thread ID: ${result.openai_thread_id}`);
           console.log(`Shared Vector Store ID: ${result.vector_store_id}`);
+          
+          // Call vectorize-grant-requirements to fetch and process requirement documents
+          console.log('Vectorizing grant requirements...');
+          try {
+            const vectorizeResponse = await fetch(
+              `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/vectorize-grant-requirements`,
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${session.access_token}`
+                },
+                body: JSON.stringify({
+                  grant_application_id: newApplicationId,
+                  vector_store_id: result.vector_store_id
+                })
+              }
+            );
+            
+            if (!vectorizeResponse.ok) {
+              const errorData = await vectorizeResponse.json();
+              console.error('Failed to vectorize requirements:', errorData);
+              // Non-blocking - continue even if this fails
+            } else {
+              const vectorizeResult = await vectorizeResponse.json();
+              console.log('Requirements vectorization initiated:', vectorizeResult);
+            }
+          } catch (vectorizeError) {
+            console.error('Error vectorizing requirements:', vectorizeError);
+            // Non-blocking - continue even if this fails
+          }
         }
       } catch (assistantError) {
         console.error('Error creating assistants:', assistantError);
@@ -193,6 +232,7 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
       localStorage.removeItem(WIZARD_STATE_KEY);
     } catch (error) {
       console.error('Error completing wizard:', error);
+      setIsSubmitting(false); // Reset loading state on error
       throw error;
     }
   };
@@ -230,7 +270,8 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
             {currentStep > 0 && (
               <button
                 onClick={handleBack}
-                className="px-4 py-2 bg-white text-indigo-600 border border-indigo-600 rounded hover:bg-indigo-50"
+                className="px-4 py-2 bg-white text-indigo-600 border border-indigo-600 rounded hover:bg-indigo-50 disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-300 disabled:cursor-not-allowed"
+                disabled={isSubmitting}
               >
                 Back
               </button>
@@ -240,9 +281,20 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
             {currentComponent && (
               <button
                 onClick={handleNext}
-                className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed flex items-center"
+                disabled={isSubmitting}
               >
-                Next
+                {isSubmitting ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Creating Application...
+                  </>
+                ) : (
+                  "Next"
+                )}
               </button>
             )}
           </div>
