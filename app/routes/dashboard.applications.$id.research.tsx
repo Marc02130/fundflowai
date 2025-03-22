@@ -28,7 +28,7 @@ export default function ResearchWindow() {
   const hasInitialized = useRef(false);
 
   useEffect(() => {
-    setSectionName('Deep Research');
+    setSectionName('Research Assistant');
     return () => setSectionName(null);
   }, [setSectionName]);
 
