@@ -1,7 +1,7 @@
 # Requirements for the Deep Research Feature
 
 ## Overview
-The Deep Research feature provides an interactive AI-powered research process for grant applications. It includes a conversation-style interface, version history tracking, and final report generation.
+The Deep Research feature provides an interactive AI-powered research process for grant applications. It includes a conversation-style interface, version history tracking, and final report generation. It depends on previously created AI assistants and vector stores.
 
 ## 1. User Requirements
 
@@ -52,9 +52,11 @@ The Deep Research feature provides an interactive AI-powered research process fo
 
 #### deep-research
 - Handles interactive research flow:
-  - Initial research setup
-  - Q&A interactions
-  - Research state management
+  - Uses pre-created assistants from create-grant-assistant
+  - Uses pre-created vector store from vectorize-worker
+  - Creates thread if needed
+  - Manages Q&A interactions
+  - Handles research state
 - Endpoints:
   - `POST /deep-research`
     - `initialize: true` - Start new research
@@ -115,68 +117,50 @@ CREATE TABLE grant_application_deep_research (
 ```
 
 ### Interaction Types
-- **ai_output**: Initial AI message or follow-up questions in JSON format with structure:
-  ```json
-  {
-    "messages": [
-      {
-        "content": "The actual message content"
-      }
-    ]
-  }
-  ```
+- **ai_output**: Initial AI message or follow-up questions
 - **user_response**: User's answers to AI questions, stored as raw text
-- **ai_response**: AI's response to user input, stored in the same JSON format as ai_output
+- **ai_response**: AI's response to user input
+
+### System Dependencies
+- **create-grant-assistant**: Creates the research assistant during application creation
+- **vectorize-worker**: Creates vector store and processes documents for semantic search
+- **openai_assistant**: Shared module providing OpenAI client and helper functions
 
 ### OpenAI Integration
-- Use OpenAI Assistants API with `OPENAI_DEEP_MODEL`
-- Configure research-specific assistant with:
-  - Independent research capabilities
-  - Web browsing and data analysis
-  - Follow-up question generation
-  - Research synthesis and evaluation
-  - Scientific literature awareness
-  - Code interpreter for data analysis
-  - Retrieval for context awareness
+- Use existing OpenAI Assistant created during application creation
+- Use gpt-4o model via OPENAI_DEEP_MODEL environment variable
+- Leverage existing vector store populated by vectorize-worker
+- Create thread if needed, otherwise reuse existing thread
 
 ### Processing Flow
 1. **Initial Load Check**:
-   - Check for existing records in `grant_application_deep_research`
-   - If no records exist:
-     - Create new OpenAI Assistant with research capabilities
+   - Verify existence of research assistant and vector store
+   - If research assistant or vector store missing, return appropriate error
+   - If no thread exists:
      - Create new Thread
-     - Load grant application description and document vectors for initial context
-     - Generate initial analysis and research direction based on context
-     - Store first `ai_content` in database
-   - If records exist:
-     - Load most recent interaction
-     - Resume existing research thread
+     - Update application with thread ID
+   - If thread exists:
+     - Reuse existing thread
 
 2. **Research Initiation**:
-   - Assistant Configuration:
-     - Name: "Grant Research Assistant"
-     - Model: OPENAI_DEEP_MODEL
-     - Tools: web_browser, retrieval, code_interpreter
-     - Instructions: Independent research guidelines
-   - Thread Setup:
-     - Create new thread per application
+   - Use existing Research Assistant:
+     - Model: gpt-4o (from OPENAI_DEEP_MODEL env var)
+     - Already configured with appropriate vector store
+   - Thread Management:
+     - Create or reuse thread
      - Store thread_id with application
      - Maintain thread context across sessions
 
 3. **Research Scope**:
    - Initial Context:
      - `grant_applications.description`: Starting point for research
-     - `grant_application_document_vectors`: Initial background material
+     - Already processed document vectors in the vector store
    - Extended Research:
-     - Independent investigation of topic
-     - Current scientific literature review
-     - State-of-the-art analysis
-     - Methodology evaluation
-     - Gap analysis and recommendations
+     - Use assistant's file_search capability to search documents
      - Generate targeted questions for deeper exploration
 
 4. **Interactive Research**:
-   - AI conducts independent research
+   - AI analyzes available documents via vector store
    - Presents findings and insights
    - Asks clarifying questions
    - Synthesizes user responses with research
@@ -187,7 +171,8 @@ CREATE TABLE grant_application_deep_research (
    - Compile all interactions
    - Generate comprehensive summary
    - Create and store `deep_research.md`
-   - Update application documents
+   - Mark interactions as having generated report
+   - Update application research status to 'completed'
 
 ### Data Management
 - Store all interactions in `grant_application_deep_research`
@@ -195,13 +180,16 @@ CREATE TABLE grant_application_deep_research (
 - Handle document versioning
 - Maintain OpenAI thread context between sessions
 
-### Additional Database Fields Needed
+### Additional Database Fields Used
 ```sql
-ALTER TABLE grant_applications
-ADD COLUMN openai_thread_id TEXT,
-ADD COLUMN research_assistant_id TEXT,
-ADD COLUMN research_status TEXT CHECK (research_status IN ('not_started', 'in_progress', 'completed')),
-ADD COLUMN research_report TEXT;
+-- These fields should already exist in grant_applications
+-- Added by various system components
+openai_thread_id TEXT,
+research_assistant_id TEXT,
+research_status TEXT CHECK (research_status IN ('not_started', 'in_progress', 'completed')),
+deep_research_prompt TEXT,
+vector_store_id TEXT
+vector_store_expires_at TIMESTAMPTZ
 ```
 
 ## 3. UI Implementation
@@ -211,6 +199,7 @@ ADD COLUMN research_report TEXT;
 - Clear distinction between AI and user content
 - Easy-to-use input mechanisms
 - Progress indicators
+- Disable/enable logic for document prerequisites
 
 ### Version History
 - Chronological list of interactions
@@ -221,7 +210,9 @@ ADD COLUMN research_report TEXT;
 ## 4. Error Handling
 - Validate all user inputs
 - Handle API timeouts and failures
-- Provide clear error messages
+- Provide clear error messages when dependencies are missing:
+  - Research assistant not found
+  - Vector store not found
 - Support graceful degradation
 - Implement retry mechanisms
 
@@ -245,13 +236,21 @@ ADD COLUMN research_report TEXT;
 - UI component testing
 - Error handling verification
 - Performance benchmarking
+- Verify dependency validation:
+  - Test behavior when assistant is missing
+  - Test behavior when vector store is missing
 
 ## Implementation Notes
 - Use TypeScript for type safety
 - Follow React best practices
 - Implement proper error boundaries
-- Use shared utilities where possible
+- Use shared utilities from openai_assistant module
 - Document all major components
+- Respect separation of concerns:
+  - vectorize-worker: document processing
+  - create-grant-assistant: assistant creation
+  - deep-research: research interaction
+  - deep-research-report: report generation
 
 ## Limitations
 - Maximum session duration: 60 minutes

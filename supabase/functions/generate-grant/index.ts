@@ -2,15 +2,15 @@
  * Generate Grant Edge Function
  * 
  * Handles automated generation of complete grant applications by processing multiple sections
- * in parallel. Optimizes performance through single-pass generation and minimal database operations.
+ * in parallel using pre-created OpenAI assistants. Uses dedicated assistants for writing and review.
  * 
  * @module generate-grant
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { handleError, EdgeFunctionError, ERROR_CODES } from '../shared/errors.ts';
-import { validateUserSession, validateUserAccess } from '../shared/auth.ts';
-import { generateText, refineText } from '../shared/openai.ts';
+import { handleError, EdgeFunctionError, ERROR_CODES } from 'errors';
+import { validateUserSession, validateUserAccess } from 'auth';
+import { assistantClient, addMessage, runAssistant, getMessages, type Message } from 'openai_assistant'
 
 // Create Supabase client
 const supabase = createClient(
@@ -23,7 +23,7 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Content-Type': 'application/json',
+  'Access-Control-Max-Age': '86400'
 };
 
 /**
@@ -90,12 +90,27 @@ async function getApplicationData(applicationId: string) {
     // Get base application
     const { data: application, error: applicationError } = await supabase
       .from('grant_applications')
-      .select('*')
+      .select(`
+        *,
+        writing_assistant_id,
+        review_assistant_id,
+        vector_store_id,
+        openai_thread_id
+      `)
       .eq('id', applicationId)
       .single();
 
     if (applicationError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get application: ${applicationError.message}`);
     if (!application) throw new EdgeFunctionError(ERROR_CODES.NOT_FOUND, 'Application not found');
+
+    // Validate required resources
+    if (!application.writing_assistant_id) {
+      throw new EdgeFunctionError(ERROR_CODES.INVALID_INPUT, 'No writing assistant found for this application');
+    }
+
+    if (!application.vector_store_id) {
+      throw new EdgeFunctionError(ERROR_CODES.INVALID_INPUT, 'No vector store found for this application');
+    }
 
     // Get opportunity details
     const { data: opportunity, error: opportunityError } = await supabase
@@ -131,46 +146,6 @@ async function getApplicationData(applicationId: string) {
 
     if (sectionDetailsError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get section details: ${sectionDetailsError.message}`);
 
-    // Get documents and their vectors
-    const { data: documents, error: documentsError } = await supabase
-      .from('grant_application_documents')
-      .select('id, file_name, file_type')
-      .eq('grant_application_id', applicationId);
-
-    if (documentsError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get documents: ${documentsError.message}`);
-
-    // Get document vectors if documents exist
-    let documentVectors = [];
-    if (documents?.length) {
-      const { data: vectors, error: vectorsError } = await supabase
-        .from('grant_application_document_vectors')
-        .select('document_id, chunk_text')
-        .in('document_id', documents.map(d => d.id));
-
-      if (vectorsError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get document vectors: ${vectorsError.message}`);
-      documentVectors = vectors || [];
-    }
-
-    // Get section documents and their vectors
-    const { data: sectionDocs, error: sectionDocsError } = await supabase
-      .from('grant_application_section_documents')
-      .select('id, file_name, file_type, grant_application_section_id')
-      .in('grant_application_section_id', sections.map(s => s.id));
-
-    if (sectionDocsError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get section documents: ${sectionDocsError.message}`);
-
-    // Get section document vectors if documents exist
-    let sectionDocVectors = [];
-    if (sectionDocs?.length) {
-      const { data: vectors, error: vectorsError } = await supabase
-        .from('grant_application_section_document_vectors')
-        .select('document_id, chunk_text')
-        .in('document_id', sectionDocs.map(d => d.id));
-
-      if (vectorsError) throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get section document vectors: ${vectorsError.message}`);
-      sectionDocVectors = vectors || [];
-    }
-
     // Combine the data
     return {
       ...application,
@@ -180,19 +155,89 @@ async function getApplicationData(applicationId: string) {
       },
       sections: sections.map(section => ({
         ...section,
-        grant_section: sectionDetails?.find(sd => sd.id === section.grant_section_id),
-        documents: sectionDocs?.filter(d => d.grant_application_section_id === section.id) || [],
-        document_vectors: sectionDocVectors.filter(v => 
-          sectionDocs?.some(d => d.id === v.document_id && d.grant_application_section_id === section.id)
-        )
-      })),
-      documents: documents || [],
-      document_vectors: documentVectors
+        grant_section: sectionDetails?.find(sd => sd.id === section.grant_section_id)
+      }))
     };
 
   } catch (err) {
     console.error('Error in getApplicationData:', err);
     throw err;
+  }
+}
+
+/**
+ * Uses a writing assistant to generate content for a specific section
+ * @param {string} threadId - OpenAI thread ID to use
+ * @param {string} assistantId - OpenAI assistant ID to use
+ * @param {string} prompt - Prompt for content generation
+ * @returns {Promise<string>} Generated content
+ */
+async function generateSectionWithAssistant(threadId: string, assistantId: string, prompt: string) {
+  try {
+    // Send prompt to assistant
+    await addMessage(threadId, prompt);
+    
+    // Run the assistant
+    await runAssistant(threadId, assistantId);
+    
+    // Get the response
+    const messages = await getMessages(threadId, { limit: 1, order: 'desc' });
+    const assistantMessage = messages.find((m: Message) => m.role === 'assistant');
+    
+    if (!assistantMessage || assistantMessage.content[0].type !== 'text') {
+      throw new Error('No valid response from assistant');
+    }
+    
+    return assistantMessage.content[0].text.value;
+  } catch (error) {
+    console.error('Error generating section with assistant:', error);
+    throw error;
+  }
+}
+
+/**
+ * Uses a review assistant to improve content for a specific section
+ * @param {string} threadId - OpenAI thread ID to use
+ * @param {string} assistantId - OpenAI assistant ID to use
+ * @param {string} content - Content to be reviewed
+ * @returns {Promise<string>} Reviewed content
+ */
+async function reviewSectionWithAssistant(threadId: string, assistantId: string, content: string) {
+  try {
+    // Format review prompt
+    const reviewPrompt = `
+Please review and improve the following grant application content:
+
+${content}
+
+Provide a complete revised version that:
+1. Enhances clarity and conciseness
+2. Strengthens logical flow and transitions
+3. Improves technical precision and terminology
+4. Fixes any grammatical or structural issues
+5. Reorganizes content for better impact if needed
+
+Return only the complete, improved version of the text without additional comments.
+`;
+
+    // Send prompt to review assistant
+    await addMessage(threadId, reviewPrompt);
+    
+    // Run the review assistant
+    await runAssistant(threadId, assistantId);
+    
+    // Get the response
+    const messages = await getMessages(threadId, { limit: 1, order: 'desc' });
+    const assistantMessage = messages.find((m: Message) => m.role === 'assistant');
+    
+    if (!assistantMessage || assistantMessage.content[0].type !== 'text') {
+      throw new Error('No valid response from review assistant');
+    }
+    
+    return assistantMessage.content[0].text.value;
+  } catch (error) {
+    console.error('Error reviewing section with assistant:', error);
+    throw error;
   }
 }
 
@@ -209,44 +254,143 @@ async function processSection(section: any, application: any, retryCount: number
     // Create field
     const field = await createField(section.id);
 
-    // Format prompt with application context and document chunks
+    // Check if we need to create a thread for this section
+    let threadId = application.openai_thread_id;
+    
+    // If no thread exists yet, create one
+    if (!threadId) {
+      console.log('No thread found, creating new thread for section', section.id);
+      try {
+        const thread = await assistantClient.beta.threads.create();
+        threadId = thread.id;
+        
+        // Update application with thread ID (this allows reuse for other sections)
+        const { error: updateError } = await supabase
+          .from('grant_applications')
+          .update({ openai_thread_id: threadId })
+          .eq('id', application.id);
+          
+        if (updateError) {
+          console.error('Failed to update application with thread ID:', updateError);
+        }
+      } catch (threadError) {
+        console.error('Error creating thread:', threadError);
+        throw threadError;
+      }
+    }
+
+    // Format prompt with application context and section-specific prompt
+    // The assistant will automatically search the vector store for relevant document content
     const formattedPrompt = `
-Section Requirements:
+Generate a comprehensive, publication-ready section for a grant application.
+
+SECTION: ${section.grant_section.name}
+
+GRANT REQUIREMENTS:
 ${application.grant_opportunity.requirements?.map((req: any) => `- ${req.requirement_text}`).join('\n') || 'No specific requirements'}
 
-Application Context:
+APPLICATION CONTEXT:
 ${application.description || 'No application description provided'}
 
-Relevant Document Content:
-${application.document_vectors.map((v: any) => v.chunk_text).join('\n\n')}
+SECTION-SPECIFIC INSTRUCTIONS:
+${section.grant_section.ai_generator_prompt || 'No specific instructions provided for this section.'}
 
-Section-Specific Documents:
-${section.document_vectors.map((v: any) => v.chunk_text).join('\n\n')}
+Your task is to generate publication-ready content for this section. 
+You have access to a vector store with uploaded documents relevant to this grant application.
+Search for and incorporate relevant information from these documents where appropriate.
 
-${section.grant_section.ai_generator_prompt}
-
-Please ensure your response:
-1. Is free of spelling, grammar, and punctuation errors
-2. Has no logical errors, contradictions, or inconsistencies
-3. Fully complies with all grant requirements listed above
-4. Incorporates relevant information from the provided document content where appropriate
+The content should:
+1. Be free of spelling, grammar, and punctuation errors
+2. Have no logical errors, contradictions, or inconsistencies
+3. Fully comply with all grant requirements listed above
+4. Incorporate relevant information from the application documents
+5. Follow the specific instructions for this section
+6. Be ready to be submitted without further editing
 `;
 
-    // Generate text with all requirements incorporated
-    const generatedText = await generateText(formattedPrompt);
-    await updateField(
-      field.id, 
-      generatedText, 
-      'complete', 
-      application.description || 'No application description provided'
-    );
+    try {
+      // Generate text with writing assistant
+      const generatedText = await generateSectionWithAssistant(
+        threadId,
+        application.writing_assistant_id,
+        formattedPrompt
+      );
+      
+      // Log that we're moving to review phase
+      console.log(`Generated text for section ${section.id}, now reviewing with review assistant`);
+      
+      // Check if we have a review assistant ID
+      if (!application.review_assistant_id) {
+        console.log('No review assistant found, using original generated text');
+        await updateField(
+          field.id, 
+          generatedText, 
+          'assistant', 
+          application.description || 'No application description provided'
+        );
+        
+        return {
+          section_id: section.id,
+          field_id: field.id,
+          status: 'completed_no_review'
+        };
+      }
+      
+      // Review the generated text
+      const reviewedText = await reviewSectionWithAssistant(
+        threadId,
+        application.review_assistant_id,
+        generatedText
+      );
+      
+      // Update the field with the reviewed text
+      await updateField(
+        field.id, 
+        reviewedText, 
+        'assistant-reviewed', 
+        application.description || 'No application description provided'
+      );
 
-    return {
-      section_id: section.id,
-      field_id: field.id,
-      status: 'completed'
-    };
+      return {
+        section_id: section.id,
+        field_id: field.id,
+        status: 'completed_with_review'
+      };
+    } catch (assistantError) {
+      console.error('Error with assistant generation, falling back to direct generation:', assistantError);
+      
+      // Fallback to direct generation - try to use the writing assistant again with simplified prompt
+      const simplifiedPrompt = `
+Generate content for the following grant section: ${section.grant_section.name}
 
+Context: ${application.description || 'No application description provided'}
+`;
+      
+      try {
+        const fallbackText = await generateSectionWithAssistant(
+          threadId,
+          application.writing_assistant_id,
+          simplifiedPrompt
+        );
+        
+        await updateField(
+          field.id, 
+          fallbackText, 
+          'fallback', 
+          application.description || 'No application description provided'
+        );
+        
+        return {
+          section_id: section.id,
+          field_id: field.id,
+          status: 'completed_fallback'
+        };
+      } catch (fallbackError) {
+        // If all assistant attempts fail, provide error message
+        console.error('All assistant attempts failed:', fallbackError);
+        throw fallbackError;
+      }
+    }
   } catch (error) {
     console.error(`Error processing section ${section.id}:`, error);
     
@@ -281,11 +425,14 @@ Please try regenerating this section or contact support if the issue persists.
   }
 }
 
-// Handle CORS preflight requests
+/**
+ * Handle CORS preflight requests
+ */
 function handleCors(req: Request) {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
+  return null;
 }
 
 /**
@@ -293,7 +440,7 @@ function handleCors(req: Request) {
  * 
  * Processes:
  * 1. Validates request and user session
- * 2. Processes all sections in parallel
+ * 2. Processes all sections in parallel using writing assistant
  * 3. Updates section statuses
  * 4. Returns consolidated results
  * 
@@ -352,21 +499,18 @@ Deno.serve({
       throw new EdgeFunctionError(ERROR_CODES.AUTH_ERROR, 'User does not have access to this application');
     }
 
-    // Process sections in parallel
+    // Process sections sequentially to avoid thread conflicts
     const results = {
       successful_sections: [] as any[],
       failed_sections: [] as any[]
     };
 
     try {
-      const sectionPromises = application.sections.map(section => {
+      // Process each section sequentially
+      for (const section of application.sections) {
         console.log(`Starting section: ${section.grant_section.name}`);
-        return processSection(section, application);
-      });
-
-      const sectionResults = await Promise.all(sectionPromises);
-
-      for (const result of sectionResults) {
+        const result = await processSection(section, application);
+        
         if ('error' in result) {
           results.failed_sections.push(result);
         } else {
@@ -379,9 +523,10 @@ Deno.serve({
         results
       }), {
         headers: {
-          'Content-Type': 'application/json',
           ...corsHeaders,
+          'Content-Type': 'application/json'
         },
+        status: 200
       });
 
     } catch (error) {

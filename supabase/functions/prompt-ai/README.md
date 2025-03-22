@@ -1,36 +1,42 @@
 # Prompt AI Edge Function
 
-This Edge Function generates and refines grant application content using AI assistance.
+This Edge Function generates grant application content using OpenAI Assistants.
 
 ## Overview
 
-The prompt-ai function generates high-quality grant content using OpenAI's GPT models, with multiple refinement stages to ensure quality and compliance.
+The prompt-ai function generates high-quality grant content using OpenAI's Assistants API, with specialized writing and review assistants to ensure quality and compliance.
 
 ### Key Features
-- Initial content generation based on section requirements
-- Multi-stage refinement process
-- Grant requirement compliance checks
-- Academic writing standards enforcement
-- Contextual awareness of grant applications
+- Content generation using dedicated writing assistants
+- Content review using specialized review assistants (when available)
+- Version history through new record creation
+- Vector store integration for context-aware generation
+- Custom user prompt support
 
 ## Function Details
 
 ### Main Handler
 - Validates user session and access
-- Retrieves section and application context
-- Processes content through generation and refinement
-- Updates field with generated content
+- Retrieves section, field, and application context
+- Retrieves or creates OpenAI thread
+- Uses writing assistant for initial content generation
+- Uses review assistant for content refinement (when available)
+- Creates new field records for version history
+- Returns detailed success/error responses with field IDs
 
 ### Processing Stages
 1. **Initial Generation**
-   - Uses section context and requirements
-   - Follows academic writing standards
-   - Incorporates user instructions
+   - Uses writing assistant with context from:
+     - Section requirements
+     - User instructions
+     - Previous content
+     - Document vectors
+   - Creates a new field record with generated content
 
-2. **Refinement Stages**
-   - Spelling and grammar check
-   - Logical consistency review
-   - Requirements compliance verification
+2. **Content Review (when available)**
+   - Uses review assistant to improve initial content
+   - Focuses on clarity, structure, and requirement compliance
+   - Creates another new field record with reviewed content
 
 ## Usage
 
@@ -43,7 +49,7 @@ POST /functions/v1/prompt-ai
 ```typescript
 {
   section_id: string;    // ID of the grant section
-  field_id: string;      // ID of the field to update
+  field_id: string;      // ID of the field to use as reference
   prompt_id?: string;    // Optional custom prompt ID
 }
 ```
@@ -52,14 +58,9 @@ POST /functions/v1/prompt-ai
 ```typescript
 {
   success: boolean;
-  data?: {
-    field_id: string;    // ID of the updated field
-  };
-  error?: {
-    code: string;
-    message: string;
-    details?: Record<string, any>;
-  };
+  field_id: string;          // ID of the newly created field
+  previous_field_id: string; // ID of the reference field
+  error?: string;            // Present only when success=false
 }
 ```
 
@@ -75,13 +76,12 @@ Uses shared error handling with specific codes:
 ## Dependencies
 
 ### Internal
-- `../shared/openai.ts`: AI text generation
+- `../shared/openai_assistant.ts`: OpenAI Assistants API integration
 - `../shared/errors.ts`: Error handling
 - `../shared/auth.ts`: Authentication
-- `../shared/db.ts`: Database operations
 
 ### External
-- OpenAI GPT-4 API
+- OpenAI Assistants API
 - Supabase Database
 
 ## Environment Variables
@@ -90,21 +90,24 @@ Required variables:
 - `OPENAI_API_KEY`: OpenAI API key
 - `SUPABASE_URL`: Supabase project URL
 - `SUPABASE_ANON_KEY`: Supabase anonymous key
-- `OPENAI_MODEL`: OpenAI model to use (defaults to 'gpt-4')
+- `OPENAI_MODEL`: Base model name for tracking (actual model is specified in the assistant)
 
-## Testing
+## Version History
 
-Tests are located in the `tests/` directory and cover:
-- Input validation
-- Authentication
-- Content generation
-- Error handling
-- Refinement stages
+All generations are stored as new records in the `grant_application_section_fields` table. Version history can be retrieved by querying:
+
+```sql
+SELECT * FROM grant_application_section_fields
+WHERE grant_application_section_id = '{section_id}'
+ORDER BY created_at DESC
+```
+
+No explicit version numbering is used; records are ordered by creation timestamp.
 
 ## Best Practices
 
 1. Always validate user access before processing
-2. Use shared error handling for consistency
-3. Include all relevant context in prompts
-4. Follow academic writing standards
-5. Verify requirement compliance 
+2. Preserve user instructions and comments across generations
+3. Create new records instead of updating existing ones
+4. Use specialized assistants for specific tasks (writing vs. review)
+5. Include all relevant context in prompts 

@@ -8,9 +8,9 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { handleError, EdgeFunctionError, ERROR_CODES } from '../shared/errors.ts';
-import { validateUserSession, validateUserAccess } from '../shared/auth.ts';
-import { generateText, refineText } from '../shared/openai.ts';
+import { handleError, EdgeFunctionError, ERROR_CODES } from 'errors';
+import { validateUserSession, validateUserAccess } from 'auth';
+import { assistantClient, addMessage, runAssistant, getMessages, type Message } from 'openai_assistant';
 
 // Create Supabase client
 const supabase = createClient(
@@ -173,6 +173,97 @@ async function saveNewSectionField(sectionId: string, aiOutput: string, previous
   return data;
 }
 
+/**
+ * Gets application data including assistant IDs
+ * @param {string} applicationId - ID of the grant application
+ * @returns {Promise<Object>} Application data with assistant IDs
+ * @throws {EdgeFunctionError} If application not found
+ */
+async function getApplicationData(applicationId: string) {
+  const { data, error } = await supabase
+    .from('grant_applications')
+    .select(`
+      *,
+      writing_assistant_id,
+      review_assistant_id,
+      openai_thread_id,
+      vector_store_id
+    `)
+    .eq('id', applicationId)
+    .single();
+
+  if (error) {
+    throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get application data: ${error.message}`);
+  }
+
+  if (!data) {
+    throw new EdgeFunctionError(ERROR_CODES.NOT_FOUND, 'Application not found');
+  }
+
+  return data;
+}
+
+/**
+ * Reviews and improves text using an OpenAI assistant
+ * @param {string} threadId - OpenAI thread ID to use
+ * @param {string} assistantId - OpenAI assistant ID for review
+ * @param {string} content - Content to be reviewed
+ * @param {Object} requirements - Optional requirements context
+ * @returns {Promise<string>} Reviewed content
+ * @throws {Error} If review fails
+ */
+async function reviewContentWithAssistant(
+  threadId: string, 
+  assistantId: string, 
+  content: string,
+  requirements?: string[]
+): Promise<string> {
+  try {
+    // Format review prompt
+    let reviewPrompt = `
+Please review and improve the following grant application content:
+
+${content}
+
+Provide a complete revised version that:
+1. Enhances clarity and conciseness
+2. Strengthens logical flow and transitions
+3. Improves technical precision and terminology
+4. Fixes any grammatical or structural issues
+5. Reorganizes content for better impact if needed
+`;
+
+    // Add requirements context if available
+    if (requirements && requirements.length > 0) {
+      reviewPrompt += `\n\nGrant Requirements:
+${requirements.map(req => `- ${req}`).join('\n')}
+
+Ensure the content fully complies with all requirements listed above.`;
+    }
+
+    reviewPrompt += '\n\nReturn only the complete, improved version of the text without additional comments.';
+
+    // Send prompt to review assistant
+    await addMessage(threadId, reviewPrompt);
+    
+    // Run the review assistant
+    await runAssistant(threadId, assistantId);
+    
+    // Get the response
+    const messages = await getMessages(threadId, { limit: 1, order: 'desc' });
+    const assistantMessage = messages.find((m: Message) => m.role === 'assistant');
+    
+    if (!assistantMessage || assistantMessage.content[0].type !== 'text') {
+      throw new Error('No valid response from review assistant');
+    }
+    
+    return assistantMessage.content[0].text.value;
+  } catch (error) {
+    console.error('Error reviewing content with assistant:', error);
+    throw error;
+  }
+}
+
 // Define CORS headers
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -274,80 +365,125 @@ Deno.serve(async (request) => {
       ai_model: latestField.ai_model
     });
     
-    // Step 1: Spelling and grammar check
-    console.log("\n=== Step 1: Spelling Check ===");
-    console.log("Input text (first 100 chars):", latestField.ai_output.substring(0, 100));
-    const spellingPrompt = `Act as a proofreading expert tasked with correcting grammatical, spelling and punctuation errors in the given text. Identify any mistakes, and make necessary corrections to ensure clarity, accuracy, enhance readability and flow. Text: ${latestField.ai_output}`;
-    console.log("Spelling prompt length:", spellingPrompt.length);
-    console.log('Starting spelling check...');
-    const spellingCheck = await refineText(latestField.ai_output, 'spelling', spellingPrompt);
-    if (!spellingCheck) {
-      console.error('Spelling check failed - no text returned');
-      throw new EdgeFunctionError(ERROR_CODES.AI_ERROR, 'Failed to complete spelling check');
+    // Get application data to access assistants
+    console.log("\n=== Getting Application Data ===");
+    const application = await getApplicationData(section.grant_application_id);
+    console.log("Application data retrieved. Has review assistant:", !!application?.review_assistant_id);
+    
+    // Check if review assistant is available
+    if (!application.review_assistant_id) {
+      throw new EdgeFunctionError(ERROR_CODES.INVALID_INPUT, 'No review assistant found for this application');
     }
-    console.log('Spelling check complete. Output length:', spellingCheck.length);
-    console.log("Output text (first 100 chars):", spellingCheck.substring(0, 100));
     
-    // Step 2: Logical errors check
-    console.log("\n=== Step 2: Logic Check ===");
-    console.log("Input text (first 100 chars):", spellingCheck.substring(0, 100));
-    const logicPrompt = `Review the following text for logical errors, contradictions, and inconsistencies. Identify any issues and provide corrected versions while maintaining the original meaning and intent of the text: ${spellingCheck}`;
-    console.log("Logic prompt length:", logicPrompt.length);
-    console.log('Starting logic check...');
-    const logicCheck = await refineText(spellingCheck, 'logic', logicPrompt);
-    if (!logicCheck) {
-      console.error('Logic check failed - no text returned');
-      throw new EdgeFunctionError(ERROR_CODES.AI_ERROR, 'Failed to complete logic check');
+    // Get or create a thread
+    let threadId = application.openai_thread_id;
+    if (!threadId) {
+      try {
+        console.log('Creating new thread for application');
+        const thread = await assistantClient.beta.threads.create();
+        threadId = thread.id;
+        
+        // Update application with thread ID
+        const { error: updateError } = await supabase
+          .from('grant_applications')
+          .update({ openai_thread_id: threadId })
+          .eq('id', application.id);
+          
+        if (updateError) {
+          console.error('Failed to update application with thread ID:', updateError);
+        }
+      } catch (threadError) {
+        console.error('Error creating thread:', threadError);
+        throw new EdgeFunctionError(
+          ERROR_CODES.AI_ERROR, 
+          `Failed to create thread: ${threadError instanceof Error ? threadError.message : 'Unknown error'}`
+        );
+      }
     }
-    console.log('Logic check complete. Output length:', logicCheck.length);
-    console.log("Output text (first 100 chars):", logicCheck.substring(0, 100));
     
-    // Step 3: Compliance check
-    console.log("\n=== Step 3: Compliance Check ===");
-    console.log("Input text (first 100 chars):", logicCheck.substring(0, 100));
+    console.log(`Using thread ID: ${threadId}`);
     
-    // Check if we have any requirements
-    const hasRequirements = section.grant_application?.grant_opportunity?.requirements?.length > 0;
-    console.log("Has requirements:", hasRequirements);
+    // Prepare requirements if available
+    const requirementUrls = section.grant_application?.grant_opportunity?.requirements?.map(req => req.url) || [];
+    console.log(`Found ${requirementUrls.length} requirements`);
 
-    let finalText;
-    if (hasRequirements) {
-      const requirements = section.grant_application.grant_opportunity.requirements.map(req => `- ${req.url}`).join('\n');
-      console.log("Requirements:", requirements);
-      const compliancePrompt = `Review the following text for compliance with the requirements specified below. Identify any non-compliant areas, explain the issues, and suggest corrections to ensure full compliance while maintaining the original intent of the text.\n\nRequirements:\n${requirements}\n\nText:\n${logicCheck}`;
-      console.log("Compliance prompt length:", compliancePrompt.length);
-      console.log('Starting compliance check...');
-      finalText = await refineText(logicCheck, 'requirements', compliancePrompt);
+    try {
+      // Use review assistant to improve content
+      console.log("\n=== Using Review Assistant ===");
+      console.log("Input text (first 100 chars):", latestField.ai_output.substring(0, 100));
+      console.log('Starting review with assistant...');
+      
+      const finalText = await reviewContentWithAssistant(
+        threadId,
+        application.review_assistant_id,
+        latestField.ai_output,
+        requirementUrls
+      );
+      
       if (!finalText) {
-        console.error('Compliance check failed - no text returned');
-        throw new EdgeFunctionError(ERROR_CODES.AI_ERROR, 'Failed to complete compliance check');
+        console.error('Review failed - no text returned');
+        throw new EdgeFunctionError(ERROR_CODES.AI_ERROR, 'Failed to complete review with assistant');
       }
-      console.log('Compliance check complete. Output length:', finalText.length);
+      
+      console.log('Review complete. Output length:', finalText.length);
       console.log("Output text (first 100 chars):", finalText.substring(0, 100));
-    } else {
-      console.log('No requirements found, skipping compliance check');
-      finalText = logicCheck;
-    }
+    
+      // Save the reviewed text
+      console.log("Saving reviewed text...");
+      const newField = await saveNewSectionField(section_id, finalText, latestField);
+      console.log("New section field saved:", newField);
 
-    // Save the reviewed text
-    console.log("Saving reviewed text...");
-    const newField = await saveNewSectionField(section_id, finalText, latestField);
-    console.log("New section field saved:", newField);
+      console.log("=== Handler execution completed successfully ===");
+      return new Response(JSON.stringify({
+        success: true,
+        data: {
+          field_id: newField.id,
+          ai_output: finalText
+        }
+      }), {
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+        status: 200
+      });
+    } catch (error) {
+      console.error('Error during review process:', error);
+      
+      // Create a new field with the error message
+      try {
+        const errorMessage = `[REVIEW FAILED]
+Error: ${error instanceof Error ? error.message : 'Unknown error'}
+Time: ${new Date().toISOString()}
 
-    console.log("=== Handler execution completed successfully ===");
-    return new Response(JSON.stringify({
-      success: true,
-      data: {
-        field_id: newField.id,
-        ai_output: finalText
+Please try again or contact support if the issue persists.`;
+        
+        // Create a new field record with the error message
+        const newField = await saveNewSectionField(section_id, errorMessage, latestField);
+        
+        // Return the error response
+        return new Response(JSON.stringify({
+          success: false,
+          data: {
+            field_id: newField.id,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          }
+        }), {
+          headers: {
+            'Content-Type': 'application/json',
+            ...corsHeaders,
+          },
+          status: 500
+        });
+      } catch (createError) {
+        console.error('Failed to create error field record:', createError);
       }
-    }), {
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders,
-      },
-      status: 200
-    });
+      
+      throw new EdgeFunctionError(
+        ERROR_CODES.AI_ERROR,
+        `Review failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
 
   } catch (error) {
     console.error('Error in handler:', error);

@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
-import { handleError, EdgeFunctionError, ERROR_CODES } from './errors';
-import { validateUserSession, validateUserAccess } from './auth';
+import { handleError, EdgeFunctionError, ERROR_CODES } from 'errors';
+import { validateUserSession, validateUserAccess } from 'auth';
 
 /**
  * Create Visuals Edge Function

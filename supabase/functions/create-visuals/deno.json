@@ -1,0 +1,11 @@
+{
+    "tasks": {
+      "dev": "deno run --allow-net --allow-env --allow-read index.ts",
+      "deploy": "supabase functions deploy create-visuals"
+    },
+    "imports": {
+      "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.7",
+      "errors": "../shared/errors.ts",
+      "auth": "../shared/auth.ts"
+    }
+  }

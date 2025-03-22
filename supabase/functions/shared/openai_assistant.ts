@@ -4,7 +4,7 @@
  * @module openai_assistant
  */
 
-import OpenAI from 'openai';
+import OpenAI from 'https://esm.sh/openai@4.89.0';
 import type { AssistantCreateParams } from 'openai/resources/beta/assistants.mjs';
 import type { Message } from 'openai/resources/beta/threads/messages.mjs';
 import { EdgeFunctionError, ERROR_CODES } from './errors.ts';

@@ -1,16 +1,16 @@
 /**
  * Prompt AI Edge Function
  * 
- * Generates and refines grant application content using AI assistance.
- * Uses OpenAI's GPT models with multiple refinement stages to ensure quality and compliance.
+ * Generates grant application content using AI assistance.
+ * Uses OpenAI's Assistants API for writing and review.
  * 
  * @module prompt-ai
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { handleError, EdgeFunctionError, ERROR_CODES } from '../shared/errors.ts';
-import { validateUserSession, validateUserAccess } from '../shared/auth.ts';
-import { generateText, refineText } from '../shared/openai.ts';
+import { handleError, EdgeFunctionError, ERROR_CODES } from 'errors';
+import { validateUserSession, validateUserAccess } from 'auth';
+import { assistantClient, addMessage, runAssistant, getMessages, type Message } from 'openai_assistant';
 
 // Create Supabase client
 const supabase = createClient(
@@ -238,24 +238,167 @@ async function getFieldData(fieldId: string) {
 }
 
 /**
- * Updates field with new AI-generated content.
- * @param {string} fieldId - ID of the field to update
+ * Creates a new field with AI-generated content
+ * @param {string} sectionId - ID of the section
  * @param {string} aiOutput - Generated content
  * @param {string} stage - Processing stage identifier
- * @throws {EdgeFunctionError} If update fails
+ * @param {string} userInstructions - User instructions to preserve
+ * @param {string | null} userComments - User comments to preserve
+ * @returns {Promise<{id: string}>} Newly created field data
+ * @throws {EdgeFunctionError} If creation fails
  */
-async function updateField(fieldId: string, aiOutput: string, stage: string) {
-  const { error } = await supabase
+async function createNewField(
+  sectionId: string,
+  aiOutput: string,
+  stage: string,
+  userInstructions: string | null,
+  userComments: string | null
+) {
+  // Insert new field record
+  const { data, error } = await supabase
     .from('grant_application_section_fields')
-    .update({
+    .insert({
+      grant_application_section_id: sectionId,
       ai_output: aiOutput,
       ai_model: `${Deno.env.get('OPENAI_MODEL')}-${stage}`,
-      updated_at: new Date().toISOString()
+      user_instructions: userInstructions,
+      user_comments_on_ai_output: userComments
     })
-    .eq('id', fieldId);
+    .select('id')
+    .single();
 
   if (error) {
-    throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to update field: ${error.message}`);
+    throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to create new field: ${error.message}`);
+  }
+
+  return data;
+}
+
+/**
+ * Gets application data including assistant IDs
+ * @param {string} applicationId - ID of the grant application
+ * @returns {Promise<Object>} Application data with assistant IDs
+ * @throws {EdgeFunctionError} If application not found
+ */
+async function getApplicationData(applicationId: string) {
+  const { data, error } = await supabase
+    .from('grant_applications')
+    .select(`
+      *,
+      writing_assistant_id,
+      review_assistant_id,
+      openai_thread_id,
+      vector_store_id
+    `)
+    .eq('id', applicationId)
+    .single();
+
+  if (error) {
+    throw new EdgeFunctionError(ERROR_CODES.DB_ERROR, `Failed to get application data: ${error.message}`);
+  }
+
+  if (!data) {
+    throw new EdgeFunctionError(ERROR_CODES.NOT_FOUND, 'Application not found');
+  }
+
+  return data;
+}
+
+/**
+ * Generates text using an OpenAI assistant
+ * @param {string} threadId - OpenAI thread ID to use
+ * @param {string} assistantId - OpenAI assistant ID for generation
+ * @param {string} prompt - Prompt for content generation
+ * @returns {Promise<string>} Generated content
+ * @throws {Error} If generation fails
+ */
+async function generateContentWithAssistant(threadId: string, assistantId: string, prompt: string): Promise<string> {
+  try {
+    // Send prompt to assistant
+    await addMessage(threadId, prompt);
+    
+    // Run the assistant
+    await runAssistant(threadId, assistantId);
+    
+    // Get the response
+    const messages = await getMessages(threadId, { limit: 1, order: 'desc' });
+    const assistantMessage = messages.find((m: Message) => m.role === 'assistant');
+    
+    if (!assistantMessage || assistantMessage.content[0].type !== 'text') {
+      throw new Error('No valid response from assistant');
+    }
+    
+    return assistantMessage.content[0].text.value;
+  } catch (error) {
+    console.error('Error generating content with assistant:', error);
+    throw error;
+  }
+}
+
+/**
+ * Reviews and improves text using an OpenAI assistant
+ * @param {string} threadId - OpenAI thread ID to use
+ * @param {string} assistantId - OpenAI assistant ID for review
+ * @param {string} content - Content to be reviewed
+ * @param {Object} requirements - Optional requirements context
+ * @returns {Promise<string>} Reviewed content
+ * @throws {Error} If review fails
+ */
+async function reviewContentWithAssistant(
+  threadId: string, 
+  assistantId: string, 
+  content: string,
+  requirements?: { 
+    grant?: any[], 
+    org?: any[] 
+  }
+): Promise<string> {
+  try {
+    // Format review prompt
+    let reviewPrompt = `
+Please review and improve the following grant application content:
+
+${content}
+
+Provide a complete revised version that:
+1. Enhances clarity and conciseness
+2. Strengthens logical flow and transitions
+3. Improves technical precision and terminology
+4. Fixes any grammatical or structural issues
+5. Reorganizes content for better impact if needed
+`;
+
+    // Add requirements context if available
+    if (requirements) {
+      reviewPrompt += `\n\nGrant Requirements:
+${requirements.grant?.map((req: any) => `- ${req.requirement}: ${req.url}`).join('\n') || 'No grant-specific requirements provided'}
+
+Organization Requirements:
+${requirements.org?.map((req: any) => `- ${req.requirement}: ${req.url}`).join('\n') || 'No organization-specific requirements provided'}
+
+Ensure the content fully complies with all requirements listed above.`;
+    }
+
+    reviewPrompt += '\n\nReturn only the complete, improved version of the text without additional comments.';
+
+    // Send prompt to review assistant
+    await addMessage(threadId, reviewPrompt);
+    
+    // Run the review assistant
+    await runAssistant(threadId, assistantId);
+    
+    // Get the response
+    const messages = await getMessages(threadId, { limit: 1, order: 'desc' });
+    const assistantMessage = messages.find((m: Message) => m.role === 'assistant');
+    
+    if (!assistantMessage || assistantMessage.content[0].type !== 'text') {
+      throw new Error('No valid response from review assistant');
+    }
+    
+    return assistantMessage.content[0].text.value;
+  } catch (error) {
+    console.error('Error reviewing content with assistant:', error);
+    throw error;
   }
 }
 
@@ -343,110 +486,183 @@ Deno.serve(async (req) => {
       promptText = userPrompt.prompt_text;
     }
 
-    // Get document vectors instead of attachments
+    // Get document vectors
     const documentVectors = await getSectionVectors(section_id);
 
-    // Stage 1: Initial Generation
-    console.log("\n=== STAGE 1: INITIAL GENERATION - START ===");
-    console.log("Prompt Text:", promptText);
-    console.log("Field Data:", field);
-    console.log("Document Vectors:", documentVectors);
-
-    const aiRequest = {
-      prompt: promptText,
-      context: {
-        instructions: field.user_instructions,
-        comments: field.user_comments_on_ai_output,
-        content: field.ai_output,
-        documentContent: documentVectors.map(v => v.chunk_text).join('\n\n')
-      }
-    };
-    console.log("AI Request:", aiRequest);
+    // Get application data for assistants
+    const application = await getApplicationData(section.grant_application.id);
     
-    // Format the prompt properly
+    // Check if we have assistants configured
+    if (!application.writing_assistant_id) {
+      throw new EdgeFunctionError(ERROR_CODES.INVALID_INPUT, 'No writing assistant found for this application');
+    }
+
+    // Get or create a thread
+    let threadId = application.openai_thread_id;
+    if (!threadId) {
+      try {
+        console.log('Creating new thread for application');
+        const thread = await assistantClient.beta.threads.create();
+        threadId = thread.id;
+        
+        // Update application with thread ID
+        const { error: updateError } = await supabase
+          .from('grant_applications')
+          .update({ openai_thread_id: threadId })
+          .eq('id', application.id);
+          
+        if (updateError) {
+          console.error('Failed to update application with thread ID:', updateError);
+        }
+      } catch (threadError) {
+        console.error('Error creating thread:', threadError);
+        throw new EdgeFunctionError(
+          ERROR_CODES.AI_ERROR, 
+          `Failed to create thread: ${threadError instanceof Error ? threadError.message : 'Unknown error'}`
+        );
+      }
+    }
+    
+    console.log(`Using thread ID: ${threadId}`);
+
+    // Format the prompt for the assistant
     const formattedPrompt = `
-Instructions: ${aiRequest.context.instructions || 'No specific instructions provided'}
+Instructions: ${field.user_instructions || 'No specific instructions provided'}
 
-Previous Comments: ${aiRequest.context.comments || 'No previous comments'}
+Previous Comments: ${field.user_comments_on_ai_output || 'No previous comments'}
 
-Previous Content: ${aiRequest.context.content || 'No previous content'}
+Previous Content: ${field.ai_output || 'No previous content'}
 
 Reference Materials:
-${aiRequest.context.documentContent || 'No reference materials available'}
+${documentVectors.map(v => v.chunk_text).join('\n\n') || 'No reference materials available'}
 
 Prompt:
-${aiRequest.prompt}
+${promptText}
 
 Please ensure your response:
 1. Is free of spelling, grammar, and punctuation errors
 2. Has no logical errors, contradictions, or inconsistencies
-3. Fully complies with all grant requirements listed above
+3. Fully complies with all grant requirements
 4. Incorporates relevant information from the provided document content where appropriate
 `;
-    console.log("Formatted Prompt:", formattedPrompt);
-    
-    let generatedText = await generateText(
-      formattedPrompt,
-      0.7
-    );
-    console.log("=== STAGE 1: INITIAL GENERATION - COMPLETE ===");
-    console.log("Generated Text:", generatedText);
-    await updateField(field_id, generatedText, 'initial');
-    
-    // Stage 2: Spelling and Grammar Check
-    console.log("\n=== STAGE 2: SPELLING & LOGIC CHECK - START ===");
-    console.log("Input Text for Spelling and Logic Check:", generatedText);
-    const spellingPrompt = `Act as a proofreading expert. Correct grammatical, spelling and punctuation errors in the given text. Identify any mistakes, and make necessary corrections to ensure clarity, accuracy, enhance readability and flow. If no changes are needed, return the original text. Text: ${generatedText}`;
-    console.log("Spelling Prompt:", spellingPrompt);
-    
-    generatedText = await refineText(generatedText, 'spelling and logic', spellingPrompt);
-    console.log("=== STAGE 2: SPELLING & LOGIC CHECK - COMPLETE ===");
-    console.log("Text After Spelling and Logic Check:", generatedText);
-    await updateField(field_id, generatedText, 'spelling and logic');
-    
-    // Stage 3: Logic Check
-    console.log("\n=== STAGE 3: LOGIC CHECK - START ===");
-    console.log("Input Text for Logic Check:", generatedText);
-    const logicPrompt = `Review the following text for logical errors, contradictions, and inconsistencies. If no changes are needed, return the original text. Identify any issues and provide corrected versions while maintaining the original meaning and intent of the text: ${generatedText}`;
-    console.log("Logic Prompt:", logicPrompt);
-    
-    generatedText = await refineText(generatedText, 'logic', logicPrompt);
-    console.log("=== STAGE 3: LOGIC CHECK - COMPLETE ===");
-    console.log("Text After Logic Check:", generatedText);
-    await updateField(field_id, generatedText, 'logic');
-    
-    // Stage 4: Requirements Check
-    console.log("\n=== STAGE 3: REQUIREMENTS CHECK - START ===");
-    console.log("Input Text for Requirements Check:", generatedText);
-    const requirementsPrompt = `Review the following text for compliance with grant requirements. If no changes are needed, return the complete original text. Make any necessary corrections while maintaining the original meaning and intent.
 
-Content to Review:
-${generatedText}
+    try {
+      console.log("\n=== GENERATING CONTENT WITH WRITING ASSISTANT ===");
+      console.log("Using writing assistant ID:", application.writing_assistant_id);
+      
+      if (!application.writing_assistant_id) {
+        throw new EdgeFunctionError(ERROR_CODES.INVALID_INPUT, 'No writing assistant configured for this application');
+      }
+      
+      // Generate content with writing assistant
+      let generatedText = await generateContentWithAssistant(
+        threadId,
+        application.writing_assistant_id,
+        formattedPrompt
+      );
+      
+      console.log("=== Writing assistant content generation complete ===");
+      
+      // Create new field with generated content
+      let newField = await createNewField(
+        section_id, 
+        generatedText, 
+        'assistant', 
+        field.user_instructions, 
+        field.user_comments_on_ai_output
+      );
+      
+      let currentFieldId = newField.id;
+      
+      // Review with review assistant if available
+      if (application.review_assistant_id) {
+        console.log("\n=== REVIEWING CONTENT WITH REVIEW ASSISTANT ===");
+        console.log("Using review assistant ID:", application.review_assistant_id);
+        
+        // Gather requirements for review
+        const requirements = {
+          grant: section.grant_application?.grant_opportunity?.requirements,
+          org: section.grant_application?.grant_opportunity?.org_requirements
+        };
+        
+        // Review the content
+        generatedText = await reviewContentWithAssistant(
+          threadId,
+          application.review_assistant_id,
+          generatedText,
+          requirements
+        );
+        
+        console.log("=== Review assistant content review complete ===");
+        
+        // Create another field with reviewed content
+        newField = await createNewField(
+          section_id, 
+          generatedText, 
+          'assistant-reviewed', 
+          field.user_instructions, 
+          field.user_comments_on_ai_output
+        );
+        
+        currentFieldId = newField.id;
+      } else {
+        console.log("No review assistant configured for this application, skipping review step");
+      }
+      
+      console.log("=== Handler execution completed successfully ===");
+      return new Response(JSON.stringify({
+        success: true,
+        field_id: currentFieldId,
+        previous_field_id: field_id
+      }), {
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    } catch (error) {
+      console.error('Error during content generation:', error);
+      
+      // Create a new field with the error message
+      try {
+        const errorMessage = `[GENERATION FAILED]
+Error: ${error instanceof Error ? error.message : 'Unknown error'}
+Time: ${new Date().toISOString()}
 
-Grant Requirements:
-${section.grant_application?.grant_opportunity?.requirements?.map(req => `- ${req.requirement}: ${req.url}`).join('\n') || 'No grant-specific requirements provided'}
-
-Organization Requirements:
-${section.grant_application?.grant_opportunity?.org_requirements?.map(req => `- ${req.requirement}: ${req.url}`).join('\n') || 'No organization-specific requirements provided'}`;
-    console.log("Requirements Prompt:", requirementsPrompt);
-    console.log("Grant Requirements:", section.grant_application?.grant_opportunity?.requirements);
-    console.log("Organization Requirements:", section.grant_application?.grant_opportunity?.org_requirements);
-    
-    generatedText = await refineText(generatedText, 'requirements', requirementsPrompt);
-    console.log("=== STAGE 4: REQUIREMENTS CHECK - COMPLETE ===");
-    console.log("Text After Requirements Check:", generatedText);
-    await updateField(field_id, generatedText, 'requirements');
-
-    console.log("=== Handler execution completed successfully ===");
-    return new Response(JSON.stringify({
-      success: true,
-      field_id: field_id
-    }), {
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders,
-      },
-    });
+Please try again or contact support if the issue persists.`;
+        
+        // Create a new field record with the error message
+        const newField = await createNewField(
+          section_id, 
+          errorMessage, 
+          'failed', 
+          field.user_instructions, 
+          field.user_comments_on_ai_output
+        );
+        
+        // Return the error response
+        return new Response(JSON.stringify({
+          success: false,
+          field_id: newField.id,
+          previous_field_id: field_id,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        }), {
+          headers: {
+            'Content-Type': 'application/json',
+            ...corsHeaders,
+          },
+          status: 500
+        });
+      } catch (createError) {
+        console.error('Failed to create error field record:', createError);
+      }
+      
+      // If error field creation fails, throw the original error
+      throw new EdgeFunctionError(
+        ERROR_CODES.AI_ERROR,
+        `AI generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
 
   } catch (error) {
     console.error('Error in handler:', error);

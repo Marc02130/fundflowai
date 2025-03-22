@@ -1,30 +1,33 @@
 # Review Edits Edge Function
 
-This Edge Function reviews and improves manually edited grant application content using AI assistance.
+This Edge Function reviews and improves grant application content using OpenAI Assistants.
 
 ## Overview
 
-The review-edits function analyzes user-edited grant content and provides improvements while maintaining the user's intent and key changes.
+The review-edits function analyzes grant content and provides improvements through the OpenAI Assistants API, ensuring high-quality academic standards while preserving user intent.
 
 ### Key Features
-- Reviews user edits for grammar and style
-- Maintains academic writing standards
-- Preserves user's core changes and intent
-- Integrates with grant application workflow
+- Content review using specialized review assistants
+- Academic writing style enhancement
+- Integration with vector store for contextual awareness
+- Grant requirements compliance verification
 
 ## Function Details
 
 ### Main Handler
 - Validates user session and access
-- Retrieves section and field data
-- Processes content through AI review
-- Updates field with improved content
+- Retrieves section, field, and application context
+- Retrieves or creates OpenAI thread
+- Uses review assistant for content refinement
+- Creates new field record with improved content
 
-### Key Components
-- **Content Analysis**: Reviews changes between versions
-- **AI Review**: Uses GPT-4 to suggest improvements
-- **Quality Checks**: Ensures academic standards
-- **Error Handling**: Uses shared error handling
+### Processing Flow
+1. **Content Review**
+   - Uses review assistant with context from:
+     - User's edited content
+     - Grant requirements
+     - Application context
+   - Creates a new field record with reviewed content
 
 ## Usage
 
@@ -46,14 +49,10 @@ POST /functions/v1/review-edits
 {
   success: boolean;
   data?: {
-    field_id: string;    // ID of the updated field
+    field_id: string;    // ID of the new field with improved content
     ai_output: string;   // Improved content
   };
-  error?: {
-    code: string;
-    message: string;
-    details?: Record<string, any>;
-  };
+  error?: string;        // Present only when success=false
 }
 ```
 
@@ -68,13 +67,12 @@ Uses shared error handling with specific codes:
 ## Dependencies
 
 ### Internal
-- `../shared/openai.ts`: AI text processing
+- `../shared/openai_assistant.ts`: OpenAI Assistants API integration
 - `../shared/errors.ts`: Error handling
 - `../shared/auth.ts`: Authentication
-- `../shared/db.ts`: Database operations
 
 ### External
-- OpenAI GPT-4 API
+- OpenAI Assistants API
 - Supabase Database
 
 ## Environment Variables
@@ -83,6 +81,7 @@ Required variables:
 - `OPENAI_API_KEY`: OpenAI API key
 - `SUPABASE_URL`: Supabase project URL
 - `SUPABASE_ANON_KEY`: Supabase anonymous key
+- `OPENAI_MODEL`: Base model name for tracking (actual model is specified in the assistant)
 
 ## Testing
 
@@ -95,6 +94,6 @@ Tests are located in the `tests/` directory and cover:
 ## Best Practices
 
 1. Always validate user access before processing
-2. Use shared error handling for consistency
-3. Preserve user's core edits and intent
-4. Maintain academic writing standards 
+2. Use the review assistant for complex content improvement
+3. Preserve user's core intent while improving presentation
+4. Include grant requirements context for compliance review 

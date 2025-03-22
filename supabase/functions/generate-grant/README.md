@@ -1,16 +1,18 @@
 # Generate Grant Edge Function
 
 ## Overview
-The Generate Grant Edge Function is a Supabase Edge Function that handles the automated generation of complete grant applications. It processes multiple sections in parallel to optimize performance and stay within execution time limits.
+The Generate Grant Edge Function is a Supabase Edge Function that handles the automated generation of complete grant applications. It processes sections sequentially using dedicated OpenAI Assistants for writing and review to optimize quality while staying within execution time limits.
 
 ## Features
-- Parallel processing of grant application sections
-- Single-pass content generation using AI
+- Sequential processing of grant application sections
+- Two-phase content generation using specialized OpenAI Assistants:
+  - Writing Assistant for initial content creation
+  - Review Assistant for content refinement and improvement
 - Efficient database operations with minimal updates
 - Built-in error handling and validation
 - Session-based authentication
-- Document vector integration for context-aware generation
-- Semantic search capabilities using document vectors
+- Vector store integration for context-aware generation
+- Robust fallback mechanisms for handling errors
 
 ## API Endpoint
 ```
@@ -20,8 +22,7 @@ POST /functions/v1/generate-grant
 ### Request Format
 ```json
 {
-  "application_id": "string",
-  "sections": ["string"]  // Array of section IDs to process
+  "application_id": "string"
 }
 ```
 
@@ -29,12 +30,23 @@ POST /functions/v1/generate-grant
 ```json
 {
   "success": boolean,
-  "sections": [
-    {
-      "id": "string",
-      "status": "string"
-    }
-  ]
+  "results": {
+    "successful_sections": [
+      {
+        "section_id": "string",
+        "field_id": "string",
+        "status": "string" // "completed_with_review", "completed_no_review", or "completed_fallback"
+      }
+    ],
+    "failed_sections": [
+      {
+        "section_id": "string",
+        "field_id": "string",
+        "error": "string",
+        "attempts": number
+      }
+    ]
+  }
 }
 ```
 
@@ -46,19 +58,22 @@ POST /functions/v1/generate-grant
 
 2. **Data Gathering**
    - Retrieves application and section data
-   - Fetches document vectors for context
-   - Loads grant requirements and organization requirements
+   - Verifies assistant IDs (writing_assistant_id and review_assistant_id)
+   - Validates vector store access
 
 3. **Section Processing**
-   - Processes all sections in parallel using Promise.all()
+   - Processes sections sequentially to avoid thread conflicts
    - Each section generation includes:
-     - Document vector context integration
-     - Application description as user instructions
-     - Grant and organization requirements validation
+     - Create a field to store the result
+     - Use OpenAI thread for assistant communication
+     - Generate content with writing assistant
+     - Review and improve content with review assistant (if available)
+     - Fallback mechanisms for handling errors
    - Results are stored with minimal database operations
 
 4. **Error Handling**
    - Comprehensive error handling for each stage
+   - Retry logic for failed generations
    - Standardized error responses
    - Detailed error logging
 
@@ -67,7 +82,7 @@ POST /functions/v1/generate-grant
 - Shared utilities:
   - `errors.ts`: Error handling utilities
   - `auth.ts`: Authentication functions
-  - `openai.ts`: AI text generation functions
+  - `openai_assistant.ts`: OpenAI Assistants API integration
 
 ## Environment Variables
 - `SUPABASE_URL`: Supabase project URL
@@ -75,21 +90,25 @@ POST /functions/v1/generate-grant
 - `OPENAI_MODEL`: OpenAI model to use for generation
 
 ## Database Tables
-- `grant_application_documents`: Stores document metadata
-- `grant_application_document_vectors`: Stores document chunk vectors
-- `grant_application_section_documents`: Stores section-specific documents
-- `grant_application_section_document_vectors`: Stores section document vectors
-- `grant_application_section_fields`: Stores generated content and user instructions
+- `grant_applications`: Stores application metadata and assistant IDs
+  - `writing_assistant_id`: ID of the OpenAI writing assistant
+  - `review_assistant_id`: ID of the OpenAI review assistant
+  - `vector_store_id`: ID of the vector store for document context
+- `grant_application_section`: Links sections to applications
+- `grant_sections`: Stores section details and prompts
+- `grant_application_section_fields`: Stores generated content and metadata
 
 ## Best Practices
 1. **Performance**
-   - Use parallel processing for multiple sections
-   - Leverage pre-processed document vectors
+   - Process sections sequentially to avoid thread conflicts
+   - Leverage pre-configured OpenAI assistants for specialized tasks
+   - Use vector stores for document context
    - Minimize database operations
    - Optimize AI prompt construction
 
 2. **Error Handling**
    - Always validate input parameters
+   - Include retry mechanisms
    - Use standardized error responses
    - Include detailed error messages for debugging
 
@@ -98,21 +117,23 @@ POST /functions/v1/generate-grant
    - Check user access permissions
    - Sanitize input data
 
-4. **Document Processing**
-   - Use vectorized document chunks for context
-   - Include relevant vectors in AI prompts
-   - Maintain vector quality through proper chunking
+4. **Content Generation**
+   - Use specialized assistants for writing and review
+   - Include context from vector stores
+   - Focus on grant-specific requirements and structure
+   - Implement graceful fallbacks for error handling
 
 ## Testing
 - Test with various section combinations
-- Verify parallel processing behavior
-- Check error handling scenarios
-- Validate response formats
-- Test vector integration
-- Verify context relevance
+- Verify sequential processing behavior
+- Check error handling and retry mechanisms
+- Validate the review process
+- Test fallback strategies
+- Verify response formats
+- Test vector store integration
 
 ## Limitations
-- Maximum execution time of 60 seconds
+- Maximum execution time constraint for Edge Functions
 - Memory constraints of Edge Function environment
 - Rate limits from OpenAI API
-- Vector dimension requirements (1536 dimensions) 
+- OpenAI thread limitations (can't add messages while a run is active) 

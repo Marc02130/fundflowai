@@ -3,7 +3,7 @@
  * @module openai
  */
 
-import OpenAI from 'openai';
+import OpenAI from 'https://esm.sh/openai@4.89.0';
 import { EdgeFunctionError, ERROR_CODES } from './errors.ts';
 
 // Maximum tokens for different operations
