@@ -15,6 +15,9 @@ import Applications from './routes/dashboard.applications';
 import ApplicationView from './routes/dashboard.applications.$id';
 import SectionEditor from './routes/dashboard.applications.$id.sections.$sectionId';
 import ResearchWindow from './routes/dashboard.applications.$id.research';
+import AdminSections from './routes/dashboard.admin.sections';
+import AdminUsers from './routes/dashboard.admin.users';
+import AdminOrganizations from './routes/dashboard.admin.organizations';
 
 const router = createBrowserRouter([
   {
@@ -68,6 +71,26 @@ const router = createBrowserRouter([
                 errorElement: <div>Error loading section</div>
               }
             ]
+          }
+        ]
+      },
+      {
+        path: 'admin',
+        children: [
+          {
+            path: 'sections',
+            element: <AdminSections />,
+            errorElement: <div>Error loading admin sections</div>
+          },
+          {
+            path: 'users',
+            element: <AdminUsers />,
+            errorElement: <div>Error loading admin users</div>
+          },
+          {
+            path: 'organizations',
+            element: <AdminOrganizations />,
+            errorElement: <div>Error loading admin organizations</div>
           }
         ]
       }

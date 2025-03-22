@@ -40,6 +40,7 @@ export default function Dashboard() {
   const location = useLocation();
   const params = useParams();
   const [isUnsubmittedExpanded, setIsUnsubmittedExpanded] = useState(true);
+  const [isAdminExpanded, setIsAdminExpanded] = useState(false);
   const [inProgressApplications, setInProgressApplications] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
@@ -301,6 +302,57 @@ export default function Dashboard() {
                 {!navCollapsed && <span className="ml-3">Profile</span>}
               </Link>
             </li>
+            
+            {/* Admin Accordion */}
+            <li className="pl-4 mt-6">
+              <div 
+                className={`flex items-start px-4 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors cursor-pointer ${isAdminExpanded ? 'bg-gray-100' : ''}`}
+                onClick={() => setIsAdminExpanded(!isAdminExpanded)}
+                title="Admin Functions"
+              >
+                <span className="text-xl shrink-0">⚙</span>
+                {!navCollapsed && (
+                  <>
+                    <span className="ml-3 break-words flex-grow">
+                      Admin
+                    </span>
+                    <span className="text-xl transition-transform shrink-0">
+                      {isAdminExpanded ? '▾' : '▸'}
+                    </span>
+                  </>
+                )}
+              </div>
+              
+              {/* Admin dropdown content */}
+              {isAdminExpanded && (
+                <ul className={`mt-2 flex flex-col gap-2 ${navCollapsed ? 'pl-3' : 'pl-8'}`}>
+                  <li className="mb-2">
+                    <Link 
+                      to="/dashboard/admin/sections"
+                      className={`block px-3 rounded-md hover:bg-gray-100 transition-colors text-gray-900 text-xl ${isActiveRoute('/dashboard/admin/sections') ? 'bg-gray-100 font-semibold' : ''}`}
+                    >
+                      {!navCollapsed && "Edit Sections"}
+                    </Link>
+                  </li>
+                  <li className="mb-2">
+                    <Link 
+                      to="/dashboard/admin/users"
+                      className={`block px-3 rounded-md hover:bg-gray-100 transition-colors text-gray-900 text-xl ${isActiveRoute('/dashboard/admin/users') ? 'bg-gray-100 font-semibold' : ''}`}
+                    >
+                      {!navCollapsed && "Edit Users"}
+                    </Link>
+                  </li>
+                  <li className="mb-2">
+                    <Link 
+                      to="/dashboard/admin/organizations"
+                      className={`block px-3 rounded-md hover:bg-gray-100 transition-colors text-gray-900 text-xl ${isActiveRoute('/dashboard/admin/organizations') ? 'bg-gray-100 font-semibold' : ''}`}
+                    >
+                      {!navCollapsed && "Edit Organizations"}
+                    </Link>
+                  </li>
+                </ul>
+              )}
+            </li>
 
             <li className="mt-8 pt-3 border-t border-gray-200">
               <Link 
@@ -332,6 +384,9 @@ export default function Dashboard() {
                   {isActiveRoute('/dashboard/new') && 'New Application'}
                   {isActiveRoute('/dashboard/unsubmitted') && 'Unsubmitted Applications'}
                   {isActiveRoute('/dashboard/applications') && 'All Applications'}
+                  {isActiveRoute('/dashboard/admin/sections') && 'Edit Grant Sections'}
+                  {isActiveRoute('/dashboard/admin/users') && 'Edit User Profiles'}
+                  {isActiveRoute('/dashboard/admin/organizations') && 'Edit Organizations'}
                 </>
               )}
             </h1>
