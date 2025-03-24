@@ -25,7 +25,8 @@ const clientOptions = {
   realtime: {
     params: {
       eventsPerSecond: 10
-    }
+    },
+    autoConnect: false
   }
 };
 
@@ -36,14 +37,17 @@ if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState === 'visible') {
       try {
-        // Instead of creating a new client, reset the connection of the existing one
-        await supabase.realtime.disconnect();
-        await supabase.realtime.connect();
-        
-        // Re-authenticate if needed
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          await supabase.auth.refreshSession();
+        // Only reconnect if there are active channels
+        if (supabase.realtime.channels.length > 0) {
+          // Instead of creating a new client, reset the connection of the existing one
+          await supabase.realtime.disconnect();
+          await supabase.realtime.connect();
+          
+          // Re-authenticate if needed
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            await supabase.auth.refreshSession();
+          }
         }
       } catch (error) {
         console.error('Error resetting Supabase connection:', error);

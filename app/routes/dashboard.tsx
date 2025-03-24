@@ -18,7 +18,9 @@ import { useNavigate, Link, Outlet, useLocation, useParams } from 'react-router-
 import { useAuth } from '~/context/AuthContext';
 import type { Route } from '~/+types/auth';
 import { supabase } from '~/lib/supabase';
+import { connectionManager } from '~/lib/connectionManager';
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
+import ConnectionStatus from '~/components/ConnectionStatus';
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -98,9 +100,13 @@ export default function Dashboard() {
     if (user) {
       fetchInProgressApplications();
 
+      // Use connectionManager for lazy loading of real-time connection
+      const channelName = 'grant_applications_changes';
+      connectionManager.startSubscription(channelName);
+
       // Subscribe to changes in grant_applications table
       const subscription = supabase
-        .channel('grant_applications_changes')
+        .channel(channelName)
         .on(
           'postgres_changes',
           {
@@ -119,6 +125,7 @@ export default function Dashboard() {
       // Cleanup subscription on unmount
       return () => {
         subscription.unsubscribe();
+        connectionManager.endSubscription(channelName);
       };
     }
   }, [user]);
@@ -172,7 +179,7 @@ export default function Dashboard() {
   }
   
   return (
-    <div className="min-h-screen flex">
+    <div className={`min-h-screen bg-white ${navCollapsed ? 'dashboard-collapsed' : ''} flex`}>
       {/* Left navigation sidebar with collapse functionality */}
       <div className={`${navCollapsed ? 'w-12' : 'w-64'} border-r border-gray-200 min-h-screen transition-all duration-300 relative`}>
         <div className="py-8 pb-1 px-6 border-b border-gray-200 relative">
@@ -304,7 +311,7 @@ export default function Dashboard() {
             </li>
             
             {/* Admin Accordion */}
-            <li className="pl-4 mt-6">
+            <li className="mt-6 mb-1">
               <div 
                 className={`flex items-start px-4 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors cursor-pointer ${isAdminExpanded ? 'bg-gray-100' : ''}`}
                 onClick={() => setIsAdminExpanded(!isAdminExpanded)}
@@ -397,6 +404,9 @@ export default function Dashboard() {
           <Outlet context={{ setSectionName }} />
         </main>
       </div>
+      
+      {/* Connection status indicator */}
+      <ConnectionStatus />
     </div>
   );
 }

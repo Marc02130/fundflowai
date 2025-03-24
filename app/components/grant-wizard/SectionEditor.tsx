@@ -19,6 +19,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '~/lib/supabase';
 import { Editor } from '@tiptap/react';
 import RichTextEditor from '~/components/RichTextEditor';
+import { connectionManager } from '~/lib/connectionManager';
 
 interface SectionEditorProps {
   sectionId: string;
@@ -596,9 +597,11 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
       };
       console.log('Request Body:', JSON.stringify(requestBody, null, 2));
 
-      // Set up realtime subscription to track refinement progress
+      const channelName = `field-updates-${newField.id}`;
+      connectionManager.startSubscription(channelName);
+      
       const subscription = supabase
-        .channel('field-updates')
+        .channel(channelName)
         .on(
           'postgres_changes',
           {
@@ -651,6 +654,7 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
       const cleanup = () => {
         console.log('Cleaning up subscription');
         subscription.unsubscribe();
+        connectionManager.endSubscription(channelName);
       };
 
       try {

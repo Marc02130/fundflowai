@@ -192,36 +192,8 @@ export default function WizardContainer({ steps, onComplete }: WizardContainerPr
           console.log(`Shared Thread ID: ${result.openai_thread_id}`);
           console.log(`Shared Vector Store ID: ${result.vector_store_id}`);
           
-          // Call vectorize-grant-requirements to fetch and process requirement documents
-          console.log('Vectorizing grant requirements...');
-          try {
-            const vectorizeResponse = await fetch(
-              `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/vectorize-grant-requirements`,
-              {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${session.access_token}`
-                },
-                body: JSON.stringify({
-                  grant_application_id: newApplicationId,
-                  vector_store_id: result.vector_store_id
-                })
-              }
-            );
-            
-            if (!vectorizeResponse.ok) {
-              const errorData = await vectorizeResponse.json();
-              console.error('Failed to vectorize requirements:', errorData);
-              // Non-blocking - continue even if this fails
-            } else {
-              const vectorizeResult = await vectorizeResponse.json();
-              console.log('Requirements vectorization initiated:', vectorizeResult);
-            }
-          } catch (vectorizeError) {
-            console.error('Error vectorizing requirements:', vectorizeError);
-            // Non-blocking - continue even if this fails
-          }
+          // Removed vectorization call to prevent duplication
+          // Vectorization is now handled in dashboard.new.tsx
         }
       } catch (assistantError) {
         console.error('Error creating assistants:', assistantError);
