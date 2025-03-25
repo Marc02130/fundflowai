@@ -563,16 +563,7 @@ Please ensure your response:
       
       console.log("=== Writing assistant content generation complete ===");
       
-      // Create new field with generated content
-      let newField = await createNewField(
-        section_id, 
-        generatedText, 
-        'assistant', 
-        field.user_instructions, 
-        field.user_comments_on_ai_output
-      );
-      
-      let currentFieldId = newField.id;
+      let finalContent = generatedText;
       
       // Review with review assistant if available
       if (application.review_assistant_id) {
@@ -586,7 +577,7 @@ Please ensure your response:
         };
         
         // Review the content
-        generatedText = await reviewContentWithAssistant(
+        finalContent = await reviewContentWithAssistant(
           threadId,
           application.review_assistant_id,
           generatedText,
@@ -594,26 +585,28 @@ Please ensure your response:
         );
         
         console.log("=== Review assistant content review complete ===");
-        
-        // Create another field with reviewed content
-        newField = await createNewField(
-          section_id, 
-          generatedText, 
-          'assistant-reviewed', 
-          field.user_instructions, 
-          field.user_comments_on_ai_output
-        );
-        
-        currentFieldId = newField.id;
       } else {
         console.log("No review assistant configured for this application, skipping review step");
       }
+
+      // Create single field with final content
+      const { data: newField, error: createError } = await supabase
+        .from('grant_application_section_fields')
+        .update({
+          ai_output: finalContent,
+          ai_model: `${Deno.env.get('OPENAI_MODEL')}-assistant-reviewed`
+        })
+        .eq('id', field_id)
+        .select()
+        .single();
+
+      if (createError) throw createError;
+      if (!newField) throw new Error('Failed to update field record');
       
       console.log("=== Handler execution completed successfully ===");
       return new Response(JSON.stringify({
         success: true,
-        field_id: currentFieldId,
-        previous_field_id: field_id
+        field_id: field_id
       }), {
         headers: {
           'Content-Type': 'application/json',
@@ -623,7 +616,7 @@ Please ensure your response:
     } catch (error) {
       console.error('Error during content generation:', error);
       
-      // Create a new field with the error message
+      // Update field with error message
       try {
         const errorMessage = `[GENERATION FAILED]
 Error: ${error instanceof Error ? error.message : 'Unknown error'}
@@ -631,20 +624,21 @@ Time: ${new Date().toISOString()}
 
 Please try again or contact support if the issue persists.`;
         
-        // Create a new field record with the error message
-        const newField = await createNewField(
-          section_id, 
-          errorMessage, 
-          'failed', 
-          field.user_instructions, 
-          field.user_comments_on_ai_output
-        );
+        // Update existing field with error
+        const { error: updateError } = await supabase
+          .from('grant_application_section_fields')
+          .update({
+            ai_output: errorMessage,
+            ai_model: `${Deno.env.get('OPENAI_MODEL')}-failed`
+          })
+          .eq('id', field_id);
+        
+        if (updateError) throw updateError;
         
         // Return the error response
         return new Response(JSON.stringify({
           success: false,
-          field_id: newField.id,
-          previous_field_id: field_id,
+          field_id: field_id,
           error: error instanceof Error ? error.message : 'Unknown error'
         }), {
           headers: {
@@ -653,11 +647,10 @@ Please try again or contact support if the issue persists.`;
           },
           status: 500
         });
-      } catch (createError) {
-        console.error('Failed to create error field record:', createError);
+      } catch (updateError) {
+        console.error('Failed to update field with error:', updateError);
       }
       
-      // If error field creation fails, throw the original error
       throw new EdgeFunctionError(
         ERROR_CODES.AI_ERROR,
         `AI generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`

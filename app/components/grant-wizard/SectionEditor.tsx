@@ -119,9 +119,10 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
   const [isPrompting, setIsPrompting] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
   const [isCreatingVisuals, setIsCreatingVisuals] = useState(false);
+  const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
 
   // Add state for tracking refinement stages
-  const [refinementStage, setRefinementStage] = useState<'initial' | 'spelling' | 'logic' | 'requirements' | 'complete' | null>(null);
+  const [refinementStage, setRefinementStage] = useState<'initial' | 'reviewing' | 'complete' | null>(null);
 
   // Add state for tracking selected version
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
@@ -529,14 +530,52 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
     }
   };
 
+  const pollForUpdates = async (fieldId: string, attempt = 0) => {
+    const MAX_ATTEMPTS = 90; // 3 minutes
+    const INTERVAL = 2000; // 2 seconds
+
+    if (attempt >= MAX_ATTEMPTS) {
+      setIsPrompting(false);
+      setError('Generation timed out. Please try again.');
+      return;
+    }
+
+    try {
+      const { data: fieldData, error } = await supabase
+        .from('grant_application_section_fields')
+        .select('*')
+        .eq('id', fieldId)
+        .single();
+
+      if (error) throw error;
+
+      // Only complete when we have content AND it's been reviewed
+      if (fieldData?.ai_output && fieldData.ai_model?.includes('assistant-reviewed')) {
+        setCurrentField(fieldData);
+        setIsPrompting(false);
+        await refreshHistory();
+        return;
+      }
+
+      // No reviewed content yet - keep polling
+      await new Promise(resolve => setTimeout(resolve, INTERVAL));
+      await pollForUpdates(fieldId, attempt + 1);
+
+    } catch (error) {
+      console.error('Error polling for updates:', error);
+      setIsPrompting(false);
+      setError('Error checking generation status');
+    }
+  };
+
   const handlePromptAI = async () => {
-    if (!section || !currentField) return;
+    if (!section || !currentField || isPrompting) return;
     
     setIsPrompting(true);
-    setRefinementStage('initial');
+    setError(null);
     
     try {
-      // Save current state if AI output exists and has been edited
+      // Save current state if needed
       if (currentField.ai_output && currentField.id !== 'new') {
         const { error: saveError } = await supabase
           .from('grant_application_section_fields')
@@ -551,7 +590,7 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
         if (saveError) throw saveError;
       }
 
-      // Create new record for AI generation
+      // Create new field for AI generation
       const { data: newField, error: createError } = await supabase
         .from('grant_application_section_fields')
         .insert({
@@ -567,7 +606,7 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
       if (createError) throw createError;
       if (!newField) throw new Error('Failed to create new field record');
 
-      // Get the selected prompt text (just for validation)
+      // Get the selected prompt text
       const promptText = selectedPrompt === 'default' 
         ? section.grant_section.ai_generator_prompt 
         : userPrompts.find(p => p.id === selectedPrompt)?.prompt_text;
@@ -582,7 +621,7 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
         throw new Error('No active session');
       }
 
-      // Call the edge function to start generation
+      // Call the edge function
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/prompt-ai`,
         {
@@ -604,75 +643,13 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
         throw new Error(error.error?.message || 'Failed to start generation');
       }
 
-      // Start polling for updates
-      const pollInterval = 2000; // Poll every 2 seconds
-      const maxAttempts = 90; // Maximum 3 minutes of polling
-      let attempts = 0;
-
-      const pollForUpdates = async () => {
-        if (attempts >= maxAttempts) {
-          throw new Error('Generation timed out');
-        }
-
-        const { data: fieldData, error: fetchError } = await supabase
-          .from('grant_application_section_fields')
-          .select('*')
-          .eq('id', newField.id)
-          .single();
-
-        if (fetchError) throw fetchError;
-        if (!fieldData) throw new Error('Field not found');
-
-        // Update current field with new content
-        setCurrentField(fieldData);
-
-        // Update refinement stage based on ai_model field
-        if (fieldData.ai_model?.includes('initial')) {
-          console.log('Initial stage complete');
-          setRefinementStage('spelling');
-        }
-        else if (fieldData.ai_model?.includes('spelling')) {
-          console.log('Spelling stage complete');
-          setRefinementStage('logic');
-        }
-        else if (fieldData.ai_model?.includes('logic')) {
-          console.log('Logic stage complete');
-          setRefinementStage('requirements');
-        }
-        else if (fieldData.ai_model?.includes('requirements')) {
-          console.log('Requirements stage complete');
-          setRefinementStage('complete');
-          
-          // Refresh history after completion
-          const { data: historyData } = await supabase
-            .from('grant_application_section_fields')
-            .select('*')
-            .eq('grant_application_section_id', sectionId)
-            .order('created_at', { ascending: false })
-            .limit(10);
-
-          if (historyData) {
-            setHistory(historyData);
-          }
-          return; // Stop polling
-        }
-
-        // Continue polling if not complete
-        attempts++;
-        setTimeout(pollForUpdates, pollInterval);
-      };
-
-      // Start the polling
-      pollForUpdates();
+      // Start polling
+      pollForUpdates(newField.id);
 
     } catch (err) {
       console.error('Error in AI generation:', err);
       setError(err instanceof Error ? err.message : 'Failed to generate content');
-      setRefinementStage(null);
-    } finally {
-      if (error) {
-        setIsPrompting(false);
-      }
+      setIsPrompting(false);
     }
   };
 
@@ -680,12 +657,37 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
   const getRefinementStatus = () => {
     if (!isPrompting) return 'Generate';
     switch (refinementStage) {
-      case 'initial': return 'Generating...';
-      case 'spelling': return 'Checking Spelling & Grammar...';
-      case 'logic': return 'Checking Logic...';
-      case 'requirements': return 'Verifying Requirements...';
-      case 'complete': return 'Complete!';
-      default: return 'Generating...';
+      case 'initial':
+        return 'Generating content...';
+      case 'reviewing':
+        return 'Reviewing content...';
+      case 'complete':
+        return 'Generation complete';
+      default:
+        return 'Generating...';
+    }
+  };
+
+  // Add refreshHistory function
+  const refreshHistory = async () => {
+    try {
+      const { data: newHistory, error: historyError } = await supabase
+        .from('grant_application_section_fields')
+        .select('*')
+        .eq('grant_application_section_id', sectionId)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (historyError) throw historyError;
+      setHistory(newHistory || []);
+      
+      // Update current field if we have new history
+      if (newHistory && newHistory.length > 0) {
+        setCurrentField(newHistory[0]);
+      }
+    } catch (err) {
+      console.error('Error refreshing history:', err);
+      setError('Failed to refresh history');
     }
   };
 

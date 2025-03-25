@@ -204,11 +204,10 @@ export default function NewGrantApplication() {
         // Non-blocking - continue even if this fails
       }
 
-      // Navigate to the application view
-      navigate(`/dashboard/applications/${application.id}`);
-      
-      // Refresh unsubmitted grants list
-      (window as any).refreshUnsubmittedGrants?.();
+      // Navigate to the application view with state indicating new grant creation
+      navigate(`/dashboard/applications/${application.id}`, {
+        state: { newGrantCreated: true }
+      });
       
       return application.id;
     } catch (err) {

@@ -187,10 +187,38 @@ export default function GrantApplicationView() {
 
       if (error) throw error;
 
-      // Refresh unsubmitted grants list
-      (window as any).refreshUnsubmittedGrants?.();
+      // Call destroy-grant-assistants to clean up OpenAI resources
+      try {
+        const destroyResponse = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/destroy-grant-assistants`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+            },
+            body: JSON.stringify({
+              grant_application_id: id
+            })
+          }
+        );
+        
+        if (!destroyResponse.ok) {
+          console.error('Failed to destroy assistants:', await destroyResponse.json());
+        }
+      } catch (destroyError) {
+        console.error('Error destroying assistants:', destroyError);
+        // Continue with navigation even if cleanup fails
+      }
 
-      navigate('/dashboard/applications');
+      // First navigate to dashboard home
+      navigate('/dashboard');
+      
+      // Then refresh the unsubmitted grants list
+      setTimeout(() => {
+        window.refreshUnsubmittedGrants?.();
+      }, 100);
+
     } catch (error) {
       console.error('Error updating application status:', error);
       setError('Failed to update application status');

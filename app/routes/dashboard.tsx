@@ -51,6 +51,7 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [sectionName, setSectionName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   
   // Load section name if we're in a section
   useEffect(() => {
@@ -80,58 +81,64 @@ export default function Dashboard() {
     loadSectionName();
   }, [params.sectionId]);
 
-  // Function to fetch in-progress applications from database
-  const fetchInProgressApplications = async () => {
+  // Function to fetch in-progress applications
+  const fetchInProgressApplications = async (retryCount = 0) => {
     try {
-      setIsLoading(true);
-      const result = await Promise.race([
-        supabase
-          .from('grant_applications')
-          .select('id, title')
-          .eq('user_id', user?.id)
-          .eq('status', 'in-progress')
-          .order('updated_at', { ascending: false })
-          .limit(5),
-        new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout')), 10000)
-        )
-      ]);
-      
-      if (result.error) throw result.error;
-      setInProgressApplications(result.data || []);
-    } catch (error) {
-      console.error('Error fetching in-progress applications:', error);
-      // Only clear applications if it's not a timeout error
-      if (!(error instanceof Error && error.message === 'Timeout')) {
-        setInProgressApplications([]);
+      if (!user?.id) return; // Don't fetch if no user ID
+
+      const { data, error } = await supabase
+        .from('grant_applications')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('status', 'in-progress')
+        .order('updated_at', { ascending: false });
+
+      if (error) {
+        if (retryCount < 3) {
+          console.log(`Retry attempt ${retryCount + 1} of 3`);
+          // Exponential backoff: 1s, 2s, 4s
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+          return fetchInProgressApplications(retryCount + 1);
+        }
+        console.log('Max retries reached for fetching in-progress applications');
+        throw error;
       }
-      // If it was a timeout error, try again after 2 seconds
-      if (error instanceof Error && error.message === 'Timeout') {
-        setTimeout(() => {
-          fetchInProgressApplications();
-        }, 2000);
-      }
-    } finally {
-      setIsLoading(false);
+
+      setInProgressApplications(data || []);
+    } catch (err) {
+      console.error('Error fetching in-progress applications:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch applications');
     }
   };
 
-  // Export the fetch function for other components to use
+  // Initial fetch when user is available
   useEffect(() => {
-    if (window) {
-      window.refreshUnsubmittedGrants = fetchInProgressApplications;
+    if (user?.id) {
+      fetchInProgressApplications(0);
+    }
+  }, [user?.id]);
+
+  // Handle new grant creation
+  useEffect(() => {
+    if (location.state?.newGrantCreated && user?.id) {
+      // Clear the state so it doesn't trigger again on refresh
+      window.history.replaceState({}, document.title);
+      // Fetch the updated list
+      fetchInProgressApplications(0);
+    }
+  }, [location.state?.newGrantCreated, user?.id]);
+
+  // Export the refresh function for other components
+  useEffect(() => {
+    if (window && user?.id) {
+      window.refreshUnsubmittedGrants = () => fetchInProgressApplications(0);
     }
     return () => {
-      window.refreshUnsubmittedGrants = undefined;
+      if (window) {
+        window.refreshUnsubmittedGrants = undefined;
+      }
     };
-  }, []);
-
-  // Fetch in-progress applications when the unsubmitted section is expanded
-  useEffect(() => {
-    if (isUnsubmittedExpanded && user) {
-      fetchInProgressApplications();
-    }
-  }, [isUnsubmittedExpanded, user]);
+  }, [user?.id]);
 
   // Determine active route for highlight in nav
   const isActiveRoute = (path: string) => {
