@@ -177,82 +177,23 @@ export default function GrantApplicationView() {
     return () => setSectionName(null);
   }, [id, setSectionName]);
 
-  const handleUpdateStatus = async (newStatus: 'cancelled' | 'submitted') => {
-    if (!application || updating) return;
-    
+  const handleUpdateStatus = async (newStatus: 'submitted' | 'cancelled') => {
     try {
       setUpdating(true);
-      console.log(`Starting ${newStatus} process for application:`, application.id);
-      
-      // 1. First update the application status in the database
-      const { error: updateError } = await supabase
+      const { error } = await supabase
         .from('grant_applications')
         .update({ status: newStatus })
-        .eq('id', application.id);
+        .eq('id', id);
 
-      if (updateError) throw updateError;
-      console.log(`Status updated to ${newStatus} in database`);
+      if (error) throw error;
 
-      // 2. Clean up OpenAI resources (assistants and vector store)
-      try {
-        console.log(`Cleaning up OpenAI resources for application ${application.id}...`);
-        
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-          console.error('No active session found for cleanup');
-          // Continue with application status update even if cleanup fails
-        } else {
-          console.log('User session found, proceeding with cleanup');
-          console.log('Session user ID:', session.user.id);
-          
-          // Prepare request payload
-          const payload = {
-            grant_application_id: application.id
-          };
-          console.log('Request payload:', payload);
-          
-          // Call the destroy-grant-assistants edge function
-          console.log('Calling destroy-grant-assistants edge function...');
-          const response = await fetch(
-            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/destroy-grant-assistants`,
-            {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${session.access_token}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify(payload)
-            }
-          );
-          
-          console.log('Response status:', response.status);
-          
-          if (!response.ok) {
-            const errorData = await response.json();
-            console.error('Failed to clean up OpenAI resources:', errorData);
-            console.error('Response status:', response.status);
-            console.error('Response status text:', response.statusText);
-            // Continue with application status update even if cleanup fails
-          } else {
-            const result = await response.json();
-            console.log('OpenAI resources cleaned up successfully:', result);
-            console.log(`Deleted assistants: ${result.deleted_assistants}`);
-            console.log(`Vector store deleted: ${result.vector_store_deleted}`);
-          }
-        }
-      } catch (cleanupError) {
-        console.error('Error cleaning up OpenAI resources:', cleanupError);
-        // Continue with application status update even if cleanup fails
-      }
+      // Refresh unsubmitted grants list
+      (window as any).refreshUnsubmittedGrants?.();
 
-      // 3. Update local state and navigate regardless of cleanup success
-      setApplication(prev => prev ? { ...prev, status: newStatus } : null);
-
-      // Navigate back to dashboard for both cancel and submit
-      navigate('/dashboard');
-    } catch (err) {
-      console.error(`Error ${newStatus === 'cancelled' ? 'cancelling' : 'submitting'} application:`, err);
-      setError(`Failed to ${newStatus === 'cancelled' ? 'cancel' : 'submit'} application`);
+      navigate('/dashboard/applications');
+    } catch (error) {
+      console.error('Error updating application status:', error);
+      setError('Failed to update application status');
     } finally {
       setUpdating(false);
     }

@@ -20,7 +20,13 @@ import type { Route } from '~/+types/auth';
 import { supabase } from '~/lib/supabase';
 import { connectionManager } from '~/lib/connectionManager';
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
-import ConnectionStatus from '~/components/ConnectionStatus';
+
+// Remove unused imports and those causing 404s
+declare global {
+  interface Window {
+    refreshUnsubmittedGrants?: () => Promise<void>;
+  }
+}
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -81,71 +87,47 @@ export default function Dashboard() {
     return location.pathname === path;
   };
 
-  // Add focus event listener to refresh applications
-  useEffect(() => {
-    if (user) {
-      const handleFocus = () => {
-        fetchInProgressApplications();
-      };
-
-      window.addEventListener('focus', handleFocus);
-      return () => {
-        window.removeEventListener('focus', handleFocus);
-      };
-    }
-  }, [user]);
-
-  // Fetch in-progress applications on mount and when user changes
+  // Fetch in-progress applications on mount only
   useEffect(() => {
     if (user) {
       fetchInProgressApplications();
-
-      // Use connectionManager for lazy loading of real-time connection
-      const channelName = 'grant_applications_changes';
-      connectionManager.startSubscription(channelName);
-
-      // Subscribe to changes in grant_applications table
-      const subscription = supabase
-        .channel(channelName)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'grant_applications',
-            filter: `user_id=eq.${user.id}`
-          },
-          () => {
-            // Refresh the list on any change to user's applications
-            fetchInProgressApplications();
-          }
-        )
-        .subscribe();
-
-      // Cleanup subscription on unmount
-      return () => {
-        subscription.unsubscribe();
-        connectionManager.endSubscription(channelName);
-      };
     }
   }, [user]);
+
+  // Export the fetch function for other components to use
+  useEffect(() => {
+    if (window) {
+      window.refreshUnsubmittedGrants = fetchInProgressApplications;
+    }
+    return () => {
+      window.refreshUnsubmittedGrants = undefined;
+    };
+  }, []);
 
   // Function to fetch in-progress applications from database
   const fetchInProgressApplications = async () => {
     try {
       setIsLoading(true);
-      const { data, error } = await supabase
-        .from('grant_applications')
-        .select('id, title')
-        .eq('user_id', user?.id)
-        .eq('status', 'in-progress')
-        .order('updated_at', { ascending: false })
-        .limit(5);
+      const result = await Promise.race([
+        supabase
+          .from('grant_applications')
+          .select('id, title')
+          .eq('user_id', user?.id)
+          .eq('status', 'in-progress')
+          .order('updated_at', { ascending: false })
+          .limit(5),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Timeout')), 10000)
+        )
+      ]);
       
-      if (error) throw error;
-      setInProgressApplications(data || []);
+      if (result.error) throw result.error;
+      setInProgressApplications(result.data || []);
     } catch (error) {
       console.error('Error fetching in-progress applications:', error);
+      if (!(error instanceof Error && error.message === 'Timeout')) {
+        setInProgressApplications([]);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -404,9 +386,6 @@ export default function Dashboard() {
           <Outlet context={{ setSectionName }} />
         </main>
       </div>
-      
-      {/* Connection status indicator */}
-      <ConnectionStatus />
     </div>
   );
 }

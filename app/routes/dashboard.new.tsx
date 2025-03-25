@@ -206,6 +206,10 @@ export default function NewGrantApplication() {
 
       // Navigate to the application view
       navigate(`/dashboard/applications/${application.id}`);
+      
+      // Refresh unsubmitted grants list
+      (window as any).refreshUnsubmittedGrants?.();
+      
       return application.id;
     } catch (err) {
       console.error('Error creating application:', {
