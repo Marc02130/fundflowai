@@ -19,7 +19,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '~/lib/supabase';
 import { Editor } from '@tiptap/react';
 import RichTextEditor from '~/components/RichTextEditor';
-import { connectionManager } from '~/lib/connectionManager';
 
 interface SectionEditorProps {
   sectionId: string;
@@ -583,131 +582,97 @@ export default function SectionEditor({ sectionId }: SectionEditorProps) {
         throw new Error('No active session');
       }
 
-      // Log request details
-      console.log('=== AI Request Details ===');
-      console.log('URL:', `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/prompt-ai`);
-      console.log('Headers:', {
-        'Authorization': `Bearer ${session.access_token}`,
-        'Content-Type': 'application/json'
-      });
-      const requestBody = {
-        section_id: sectionId,
-        field_id: newField.id,
-        prompt_id: selectedPrompt === 'default' ? undefined : selectedPrompt
-      };
-      console.log('Request Body:', JSON.stringify(requestBody, null, 2));
-
-      const channelName = `field-updates-${newField.id}`;
-      connectionManager.startSubscription(channelName);
-      
-      const subscription = supabase
-        .channel(channelName)
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'grant_application_section_fields',
-            filter: `id=eq.${newField.id}`
+      // Call the edge function to start generation
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/prompt-ai`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json'
           },
-          (payload) => {
-            console.log('Received field update:', payload);
-            const updatedField = payload.new as typeof newField;
-            // Update current field with new content
-            setCurrentField(updatedField);
-            
-            // Update refinement stage based on ai_model field
-            if (updatedField.ai_model?.includes('initial')) {
-              console.log('Initial stage complete');
-              setRefinementStage('spelling');
-            }
-            else if (updatedField.ai_model?.includes('spelling')) {
-              console.log('Spelling stage complete');
-              setRefinementStage('logic');
-            }
-            else if (updatedField.ai_model?.includes('logic')) {
-              console.log('Logic stage complete');
-              setRefinementStage('requirements');
-            }
-            else if (updatedField.ai_model?.includes('requirements')) {
-              console.log('Requirements stage complete');
-              setRefinementStage('complete');
-              
-              // Refresh history after completion
-              supabase
-                .from('grant_application_section_fields')
-                .select('*')
-                .eq('grant_application_section_id', sectionId)
-                .order('created_at', { ascending: false })
-                .limit(10)
-                .then(({ data, error }) => {
-                  if (!error && data) {
-                    setHistory(data);
-                  }
-                });
-            }
-          }
-        )
-        .subscribe();
+          body: JSON.stringify({
+            section_id: sectionId,
+            field_id: newField.id,
+            prompt_id: selectedPrompt === 'default' ? undefined : selectedPrompt
+          })
+        }
+      );
 
-      // Clean up subscription on error or completion
-      const cleanup = () => {
-        console.log('Cleaning up subscription');
-        subscription.unsubscribe();
-        connectionManager.endSubscription(channelName);
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error?.message || 'Failed to start generation');
+      }
+
+      // Start polling for updates
+      const pollInterval = 2000; // Poll every 2 seconds
+      const maxAttempts = 90; // Maximum 3 minutes of polling
+      let attempts = 0;
+
+      const pollForUpdates = async () => {
+        if (attempts >= maxAttempts) {
+          throw new Error('Generation timed out');
+        }
+
+        const { data: fieldData, error: fetchError } = await supabase
+          .from('grant_application_section_fields')
+          .select('*')
+          .eq('id', newField.id)
+          .single();
+
+        if (fetchError) throw fetchError;
+        if (!fieldData) throw new Error('Field not found');
+
+        // Update current field with new content
+        setCurrentField(fieldData);
+
+        // Update refinement stage based on ai_model field
+        if (fieldData.ai_model?.includes('initial')) {
+          console.log('Initial stage complete');
+          setRefinementStage('spelling');
+        }
+        else if (fieldData.ai_model?.includes('spelling')) {
+          console.log('Spelling stage complete');
+          setRefinementStage('logic');
+        }
+        else if (fieldData.ai_model?.includes('logic')) {
+          console.log('Logic stage complete');
+          setRefinementStage('requirements');
+        }
+        else if (fieldData.ai_model?.includes('requirements')) {
+          console.log('Requirements stage complete');
+          setRefinementStage('complete');
+          
+          // Refresh history after completion
+          const { data: historyData } = await supabase
+            .from('grant_application_section_fields')
+            .select('*')
+            .eq('grant_application_section_id', sectionId)
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+          if (historyData) {
+            setHistory(historyData);
+          }
+          return; // Stop polling
+        }
+
+        // Continue polling if not complete
+        attempts++;
+        setTimeout(pollForUpdates, pollInterval);
       };
 
-      try {
-        // Call the edge function with just the IDs
-        const response = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/prompt-ai`,
-          {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${session.access_token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(requestBody),
-          }
-        );
+      // Start the polling
+      pollForUpdates();
 
-        // Log response details
-        console.log('=== AI Response Details ===');
-        console.log('Status:', response.status);
-        console.log('Status Text:', response.statusText);
-        console.log('Headers:', Object.fromEntries(response.headers.entries()));
-        
-        if (!response.ok) {
-          const errorData = await response.json();
-          console.log('Error Response:', errorData);
-          cleanup();
-          throw new Error(errorData.error?.message || 'Failed to generate text');
-        }
-
-        // Wait for completion or error
-        const result = await response.json();
-        console.log('Success Response:', result);
-        
-        if (!result.success) {
-          cleanup();
-          throw new Error('Failed to generate text');
-        }
-
-        // Keep subscription active to track refinement stages
-        // It will be cleaned up when refinement is complete
-
-      } catch (err) {
-        console.error('Error generating text:', err);
-        setError(err instanceof Error ? err.message : 'Failed to generate text');
-        setRefinementStage(null);
-        cleanup();
-      } finally {
+    } catch (err) {
+      console.error('Error in AI generation:', err);
+      setError(err instanceof Error ? err.message : 'Failed to generate content');
+      setRefinementStage(null);
+    } finally {
+      if (error) {
         setIsPrompting(false);
       }
-    } catch (err) {
-      console.error('Error generating text:', err);
-      setError(err instanceof Error ? err.message : 'Failed to generate text');
-      setRefinementStage(null);
     }
   };
 

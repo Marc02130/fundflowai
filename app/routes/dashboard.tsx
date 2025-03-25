@@ -18,8 +18,6 @@ import { useNavigate, Link, Outlet, useLocation, useParams } from 'react-router-
 import { useAuth } from '~/context/AuthContext';
 import type { Route } from '~/+types/auth';
 import { supabase } from '~/lib/supabase';
-import { connectionManager } from '~/lib/connectionManager';
-import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 
 // Remove unused imports and those causing 404s
 declare global {
@@ -82,28 +80,6 @@ export default function Dashboard() {
     loadSectionName();
   }, [params.sectionId]);
 
-  // Determine active route for highlight in nav
-  const isActiveRoute = (path: string) => {
-    return location.pathname === path;
-  };
-
-  // Fetch in-progress applications on mount only
-  useEffect(() => {
-    if (user) {
-      fetchInProgressApplications();
-    }
-  }, [user]);
-
-  // Export the fetch function for other components to use
-  useEffect(() => {
-    if (window) {
-      window.refreshUnsubmittedGrants = fetchInProgressApplications;
-    }
-    return () => {
-      window.refreshUnsubmittedGrants = undefined;
-    };
-  }, []);
-
   // Function to fetch in-progress applications from database
   const fetchInProgressApplications = async () => {
     try {
@@ -125,12 +101,46 @@ export default function Dashboard() {
       setInProgressApplications(result.data || []);
     } catch (error) {
       console.error('Error fetching in-progress applications:', error);
+      // Only clear applications if it's not a timeout error
       if (!(error instanceof Error && error.message === 'Timeout')) {
         setInProgressApplications([]);
+      }
+      // If it was a timeout error, try again after 2 seconds
+      if (error instanceof Error && error.message === 'Timeout') {
+        setTimeout(() => {
+          fetchInProgressApplications();
+        }, 2000);
       }
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Export the fetch function for other components to use
+  useEffect(() => {
+    if (window) {
+      window.refreshUnsubmittedGrants = fetchInProgressApplications;
+    }
+    return () => {
+      window.refreshUnsubmittedGrants = undefined;
+    };
+  }, []);
+
+  // Fetch in-progress applications when the unsubmitted section is expanded
+  useEffect(() => {
+    if (isUnsubmittedExpanded && user) {
+      fetchInProgressApplications();
+    }
+  }, [isUnsubmittedExpanded, user]);
+
+  // Determine active route for highlight in nav
+  const isActiveRoute = (path: string) => {
+    return location.pathname === path;
+  };
+
+  // Handle unsubmitted section toggle
+  const handleUnsubmittedToggle = () => {
+    setIsUnsubmittedExpanded(!isUnsubmittedExpanded);
   };
 
   // Protect the route - redirect to auth if not logged in
@@ -216,7 +226,7 @@ export default function Dashboard() {
             <li className="pl-4">
               <div 
                 className={`flex items-start px-4 text-xl hover:bg-gray-200 rounded-md min-h-14 transition-colors cursor-pointer ${inProgressApplications.length > 0 ? 'bg-gray-100' : ''}`}
-                onClick={() => setIsUnsubmittedExpanded(!isUnsubmittedExpanded)}
+                onClick={handleUnsubmittedToggle}
                 title="Unsubmitted Applications"
               >
                 <span className="text-xl shrink-0">○</span>
